@@ -1,0 +1,645 @@
+extern "C"
+{
+#include "llvm-c/Core.h"
+#include "llvm-c/TargetMachine.h"
+#include "llvm-c/Transforms/PassBuilder.h"
+}
+#include <stdbool.h>
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <vector>
+#include <memory>
+#include <malloc.h>
+#include "asts.cpp"
+#include "utils.cpp"
+
+FILE *current_file;
+static int next_char()
+{
+    static char buf[1024 * 4];
+    static char *p = buf;
+    static int n = 0;
+    if (n == 0)
+    {
+        n = fread(buf, 1, sizeof(buf), current_file);
+        p = buf;
+    }
+    char ret = n-- > 0 ? *p++ : EOF;
+    fputc(ret, stderr);
+    return ret;
+}
+/// --- BEGIN LEXER --- ///
+const int T_EOF = -1;        // end of file
+const int T_IDENTIFIER = -2; // foo
+const int T_NUMBER = -3;     // 123
+const int T_STRING = -4;     // "foo"
+const int T_CHAR = -5;       // 'a'
+const int T_BOOL = -6;       // true
+const int T_IF = -7;         // if
+const int T_ELSE = -8;       // else
+const int T_WHILE = -9;      // while
+const int T_RETURN = -10;    // return
+const int T_FUNCTION = -11;  // fun
+const int T_EXTERN = -12;    // extern
+static unsigned int identifier_string_length;
+static char *identifier_string;    // [a-zA-Z][a-zA-Z0-9]* - Filled in if T_IDENTIFIER
+static char char_value;            // '[^']' - Filled in if T_CHAR
+static char *num_value;            // Filled in if T_NUMBER
+static unsigned int num_length;    // len(num_value) - Filled in if T_NUMBER
+static bool num_has_dot;           // Whether num_value contains '.' - Filled in if T_NUMBER
+static char num_type;              // Type of number. 'd' => double, 'f' => float, 'i' => int32, 'u' => uint32, 'b' => byte/char/uint8
+static char *string_value;         // "[^"]*" - Filled in if T_STRING
+static unsigned int string_length; // len(string_value) - Filled in if T_STRING
+
+static int last_char = ' ';
+static void read_str(bool (*predicate)(char), char **output, unsigned int *length)
+{
+    unsigned int curr_size = 512;
+    char *str = (char *)malloc(curr_size);
+    static unsigned int str_len = 0;
+    str[0] = last_char;
+    str_len = 1;
+    while (predicate(last_char = next_char()))
+    {
+        if (str_len > curr_size)
+        {
+            curr_size *= 2;
+            str = (char *)realloc(str, curr_size);
+        }
+        str[str_len] = last_char;
+        str_len++;
+    }
+    str[str_len] = '\0';
+    str = (char *)realloc(str, str_len + 1);
+    *output = str;
+    *length = str_len;
+    return;
+}
+// isdigit(c) || c=='.'
+static bool is_numish(char c)
+{
+    if (c == '.')
+    {
+        if (num_has_dot)
+            error("number can't have multiple .s");
+        num_has_dot = true;
+        return true;
+    }
+    return isdigit(c);
+}
+// c != '"'
+static bool isnt_quot(char c)
+{
+    return c != '"';
+}
+// (!isspace(c))
+static bool isnt_space(char c)
+{
+    return !isspace(c);
+}
+static bool is_alphaish(char c)
+{
+    return isalpha(c) || c == '_';
+}
+// Returns a token, or a number of the token's ASCII value.
+static int next_token()
+{
+    if (last_char == EOF)
+        return T_EOF;
+    while (isspace(last_char))
+    {
+        last_char = next_char();
+    }
+    if (isalpha(last_char))
+    {
+        read_str(&is_alphaish, &identifier_string, &identifier_string_length);
+        if (streq(identifier_string, identifier_string_length, "fun", 3))
+            return T_FUNCTION;
+        else if (streq(identifier_string, identifier_string_length, "extern", 6))
+            return T_EXTERN;
+        else if (streq(identifier_string, identifier_string_length, "if", 2))
+            return T_IF;
+        else if (streq(identifier_string, identifier_string_length, "else", 4))
+            return T_ELSE;
+        return T_IDENTIFIER;
+    }
+    else if (isdigit(last_char) || last_char == '.')
+    {
+        // Number: [0-9]*.?[0-9]*
+        num_has_dot = false;
+        read_str(&is_numish, &num_value, &num_length);
+        if (last_char == 'd' || last_char == 'f' || last_char == 'i' || last_char == 'u' || last_char == 'b')
+        {
+            num_type = last_char;
+            last_char = next_char();
+        }
+        else
+            num_type = 'd';
+        return T_NUMBER;
+    }
+    else if (last_char == '"')
+    {
+        // TODO: implement strings as [ n x i8 ] type
+        // String: "[^"]*"
+        read_str(&isnt_quot, &string_value, &string_length);
+        return T_STRING;
+    }
+    else if (last_char == '#')
+    {
+        // #[^\n\r]*
+        do
+            last_char = next_char();
+        while (last_char != EOF && last_char != '\n' && last_char != '\r');
+        return next_token(); // could recurse overflow, might make a wrapper function that while's and a T_COMMENT type
+    }
+    else if (last_char == '\'')
+    {
+        // TODO: implement chars as i8 type
+        // Char: '[^']'
+        next_char(); // eat '
+        if (last_char == EOF || last_char == '\n' || last_char == '\r')
+            error("Unterminated char\n");
+        char_value = next_char();
+        if (next_char() != '\'') // eat '
+            error("char with length above 1");
+        last_char = next_char();
+        return T_CHAR;
+    }
+
+    // Otherwise, just return the character as its ascii value.
+    int curr_char = last_char;
+    last_char = next_char();
+    return curr_char;
+}
+/// --- END LEXER --- ///
+/// --- BEGIN PARSER --- ///
+static int curr_token;
+static int get_next_token()
+{
+    return curr_token = next_token();
+}
+static int eat(int expected_token, char *exp_name = nullptr)
+{
+    if (curr_token != expected_token)
+    {
+        char *exp;
+        if (exp_name == nullptr)
+        {
+            exp = (char *)malloc(2);
+            exp[0] = expected_token;
+            exp[1] = '\0';
+        }
+        else
+            exp = exp_name;
+        fprintf(stderr, "Error: Unexpected token '%c' (%d), expected '%s'", curr_token, curr_token, exp);
+        exit(1);
+    }
+    else
+        return get_next_token();
+}
+static std::unique_ptr<ExprAST> parse_expr();
+static std::unique_ptr<ExprAST> parse_primary();
+
+static std::unique_ptr<ExprAST> parse_number_expr()
+{
+    auto result = std::make_unique<NumberExprAST>(num_value, num_length, num_type, num_has_dot);
+    get_next_token(); // consume the number
+    return std::move(result);
+}
+/// parenexpr ::= '(' expression ')'
+static std::unique_ptr<ExprAST> parse_paren_expr()
+{
+    eat('(');
+    auto expr = parse_expr();
+    eat(')');
+    return std::move(expr);
+}
+
+/// identifierexpr
+///   ::= identifier
+///   ::= identifier '(' expression* ')'
+static std::unique_ptr<ExprAST> parse_identifier_expr()
+{
+    char *id = identifier_string;
+    unsigned int id_len = identifier_string_length;
+    eat(T_IDENTIFIER, (char *)"identifier");
+
+    if (curr_token != '(') // variable ref
+        return std::make_unique<VariableExprAST>(id, id_len);
+    // function call
+
+    eat('('); // eat (
+    std::vector<std::unique_ptr<ExprAST>> args;
+    if (curr_token != ')')
+    {
+        while (1)
+        {
+            if (auto arg = parse_expr())
+                args.push_back(std::move(arg));
+            else
+                return nullptr;
+
+            if (curr_token == ')')
+                break;
+
+            if (curr_token != ',')
+                error("Expected ')' or ',' in argument list");
+            get_next_token();
+        }
+    }
+
+    // Eat the ')'.
+    get_next_token();
+
+    return std::make_unique<CallExprAST>(id, id_len, std::move(args));
+}
+/// ifexpr ::= 'if' expression 'then' expression 'else' expression
+static std::unique_ptr<ExprAST> parse_if_expr()
+{
+    eat(T_IF, (char *)"if");
+
+    auto cond = parse_paren_expr();
+    auto then = parse_expr();
+    // todo: if without else support
+    eat(T_ELSE, (char *)"else");
+    auto elze = parse_expr();
+
+    return std::make_unique<IfExprAST>(std::move(cond), std::move(then),
+                                       std::move(elze));
+}
+
+static std::unique_ptr<ExprAST> parse_block()
+{
+    static const unsigned int MAX_EXPRS = 1024;
+    eat('{');
+    std::unique_ptr<ExprAST> *exprs = (std::unique_ptr<ExprAST> *)calloc(MAX_EXPRS, sizeof(std::unique_ptr<ExprAST>));
+    unsigned int expr_i = 0;
+    for (; curr_token != '}'; expr_i++)
+        if (curr_token == T_EOF)
+            error("unclosed block");
+        else if (expr_i > MAX_EXPRS)
+            error("too many exprs in block (>1024)");
+        else
+            exprs[expr_i] = std::move(parse_primary());
+    exprs = (std::unique_ptr<ExprAST> *)reallocarray(exprs, expr_i, sizeof(std::unique_ptr<ExprAST>));
+    eat('}');
+    return std::make_unique<BlockExprAST>(exprs, expr_i);
+}
+
+/// primary
+///   ::= identifierexpr
+///   ::= numberexpr
+///   ::= parenexpr
+static std::unique_ptr<ExprAST> parse_primary()
+{
+    switch (curr_token)
+    {
+    default:
+        fprintf(stderr, "unknown token '%c' (%d) when expecting an expression", curr_token, curr_token);
+        exit(1);
+    case T_IDENTIFIER:
+        return parse_identifier_expr();
+    case T_NUMBER:
+        return parse_number_expr();
+    case '(':
+        return parse_paren_expr();
+    case T_IF:
+        return parse_if_expr();
+    case '{':
+        return parse_block();
+    }
+}
+static std::map<char, int> binop_precedence;
+static int get_token_precedence()
+{
+    if (curr_token < 0)
+        return -1; // isn't a single-character token
+    int t_prec = binop_precedence[curr_token];
+    if (t_prec <= 0)
+        return -1;
+    return t_prec;
+}
+/// unary
+///   ::= primary
+///   ::= '!' unary
+static std::unique_ptr<ExprAST> parse_unary()
+{
+    // If the current token is not an operator, it must be a primary expr.
+    if (!isascii(curr_token) || curr_token == '(' || curr_token == ',' || curr_token == '{')
+        return parse_primary();
+
+    // If this is a unary operator, read it.
+    int opc = curr_token;
+    get_next_token();
+    if (auto operand = parse_unary())
+        return std::make_unique<UnaryExprAST>(opc, std::move(operand));
+    return nullptr;
+}
+/// binoprhs
+///   ::= ('+' primary)*
+static std::unique_ptr<ExprAST> parse_bin_op_rhs(int expr_prec,
+                                                 std::unique_ptr<ExprAST> LHS)
+{
+    // If this is a binop, find its precedence.
+    while (true)
+    {
+        int t_prec = get_token_precedence();
+
+        // If this is a binop that binds at least as tightly as the current binop,
+        // consume it, otherwise we are done.
+        if (t_prec < expr_prec)
+            return LHS;
+
+        // Okay, we know this is a binop.
+        int bin_op = curr_token;
+        get_next_token(); // eat binop
+
+        // Parse the primary expression after the binary operator.
+        auto RHS = parse_unary();
+        if (!RHS)
+            return nullptr;
+
+        // If BinOp binds less tightly with RHS than the operator after RHS, let
+        // the pending operator take RHS as its LHS.
+        int next_prec = get_token_precedence();
+        if (t_prec < next_prec)
+        {
+            RHS = parse_bin_op_rhs(t_prec + 1, std::move(RHS));
+            if (!RHS)
+                return nullptr;
+        }
+
+        // Merge LHS/RHS.
+        LHS =
+            std::make_unique<BinaryExprAST>(bin_op, std::move(LHS), std::move(RHS));
+    }
+}
+static std::unique_ptr<ExprAST> parse_expr()
+{
+    auto LHS = parse_unary();
+    return parse_bin_op_rhs(0, std::move(LHS));
+}
+/// prototype
+///   ::= id '(' id* ')'
+static std::unique_ptr<PrototypeAST> parse_prototype()
+{
+    char *fn_name = identifier_string;
+    unsigned int fn_name_len = identifier_string_length;
+    eat(T_IDENTIFIER, (char *)"identifier");
+
+    if (curr_token != '(')
+    {
+        fprintf(stderr, "Error: Unexpected token '%c' (%d), expected '%c'", curr_token, curr_token, '(');
+        exit(1);
+    }
+
+    // Read the list of argument names.
+    char **arg_names = (char **)malloc(256);
+    unsigned int *arg_name_lens = (unsigned int *)malloc(256);
+    char **arg_types = (char **)malloc(256);
+    unsigned int *arg_type_lens = (unsigned int *)malloc(256);
+    unsigned int arg_count = 0;
+
+    get_next_token();
+    if (curr_token != ')')
+        while (1)
+        {
+            arg_names[arg_count] = identifier_string;
+            arg_name_lens[arg_count] = identifier_string_length;
+            eat(T_IDENTIFIER, (char *)"identifier");
+            eat(':');
+            arg_types[arg_count] = identifier_string;
+            arg_type_lens[arg_count] = identifier_string_length;
+            eat(T_IDENTIFIER, (char *)"identifier");
+            arg_count++;
+            if (curr_token == ')')
+                break;
+            if (curr_token != ',')
+                error("Expected ')' or ',' in argument list");
+            get_next_token();
+        }
+    eat(')');
+    char *return_type;
+    unsigned int return_type_len = 0;
+    if (curr_token == ':')
+    {
+        eat(':');
+        eat(T_IDENTIFIER, (char *)"identifier");
+        return_type = identifier_string;
+        return_type_len = identifier_string_length;
+    }
+
+    return std::make_unique<PrototypeAST>(fn_name, fn_name_len, arg_names, arg_name_lens, arg_types, arg_type_lens, return_type, return_type_len, arg_count);
+}
+
+/// definition ::= 'fun' prototype expression
+static std::unique_ptr<FunctionAST> parse_definition()
+{
+    eat(T_FUNCTION, (char *)"fun");
+    auto proto = parse_prototype();
+
+    auto e = parse_expr();
+    return std::make_unique<FunctionAST>(std::move(proto), std::move(e));
+}
+/// external ::= 'extern' prototype
+static std::unique_ptr<PrototypeAST> parse_extern()
+{
+    eat(T_EXTERN, (char *)"extern"); // eat extern.
+    return parse_prototype();
+}
+// /// toplevelexpr ::= expression
+// static std::unique_ptr<FunctionAST> parse_top_level_expr()
+// {
+//     if (auto E = parse_expr())
+//     {
+//         // Make an anonymous proto.
+//         auto Proto = std::make_unique<PrototypeAST>(nullptr, 0, nullptr, 0);
+//         return std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
+//     }
+//     return nullptr;
+// }
+static void handle_definition()
+{
+    if (auto ast = parse_definition())
+    {
+        fprintf(stderr, "Parsed a function definition.\n");
+        ast->print_codegen_to(stderr);
+    }
+    else
+        // Skip token for error recovery.
+        get_next_token();
+}
+
+static void handle_extern()
+{
+    if (auto ast = parse_extern())
+    {
+        fprintf(stderr, "Parsed an extern\n");
+        ast->print_codegen_to(stderr);
+    }
+    else
+        // Skip token for error recovery.
+        get_next_token();
+}
+
+// static void handle_top_level_expr()
+// {
+//     // Evaluate a top-level expression into an anonymous function.
+//     if (auto ast = parse_top_level_expr())
+//     {
+//         fprintf(stderr, "Parsed a top-level expr\n");
+//         ast->print_codegen_to(stderr);
+//     }
+//     else
+//         // Skip token for error recovery.
+//         get_next_token();
+// }
+/// top ::= definition | external | expression | ';'
+static void main_loop()
+{
+    get_next_token();
+    while (1)
+    {
+        switch (curr_token)
+        {
+        case T_EOF:
+            return;
+        case ';': // ignore top-level semicolons.
+            get_next_token();
+            break;
+        case T_FUNCTION:
+            handle_definition();
+            break;
+        case T_EXTERN:
+            handle_extern();
+            break;
+        default:
+            // handle_top_level_expr();
+            fprintf(stderr, "Unexpected token '%c' (%d) at top-level", curr_token, curr_token);
+            exit(1);
+            break;
+        }
+    }
+}
+/// --- END PARSER --- ///
+int main(int argc, char **argv)
+{
+    if (argc != 3)
+    {
+        printf("Usage: %s <filename> <output>\n", argv[0]);
+        return 1;
+    }
+
+    binop_precedence['<'] = 10;
+    binop_precedence['+'] = 20;
+    binop_precedence['-'] = 20;
+    binop_precedence['*'] = 40; // highest
+
+    // host machine triple
+    char *target_triple = LLVMGetDefaultTargetTriple();
+    LLVMTargetRef target;
+    char *error_message;
+    LLVMInitializeAllTargets();
+    LLVMInitializeAllTargetInfos();
+    LLVMInitializeAllTargetMCs();
+    if (LLVMGetTargetFromTriple(target_triple, &target, &error_message) != 0)
+        error(error_message);
+    char *host_cpu_name = LLVMGetHostCPUName();
+    char *host_cpu_features = LLVMGetHostCPUFeatures();
+    LLVMTargetMachineRef target_machine = LLVMCreateTargetMachine(target, target_triple, host_cpu_name, host_cpu_features, LLVMCodeGenLevelAggressive, LLVMRelocStatic, LLVMCodeModelSmall);
+    curr_module = LLVMModuleCreateWithName(argv[1]);
+    LLVMSetTarget(curr_module, target_triple);
+    curr_builder = LLVMCreateBuilder();
+    curr_ctx = LLVMGetGlobalContext();
+    curr_pass_manager = LLVMCreateFunctionPassManagerForModule(curr_module);
+    LLVMAddAnalysisPasses(target_machine, curr_pass_manager);
+    LLVMInitializeFunctionPassManager(curr_pass_manager);
+    current_file = fopen(argv[1], "r");
+    FILE *output_file = fopen(argv[2], "w");
+    main_loop();
+    char *output = LLVMPrintModuleToString(curr_module);
+    fprintf(output_file, "%s", output);
+    // dispose
+    LLVMDisposeMessage(output);
+    LLVMFinalizeFunctionPassManager(curr_pass_manager);
+    LLVMDisposeModule(curr_module);
+    LLVMDisposeBuilder(curr_builder);
+    LLVMDisposePassManager(curr_pass_manager);
+    LLVMDisposeMessage(target_triple);
+    LLVMDisposeMessage(host_cpu_name);
+    LLVMDisposeMessage(host_cpu_features);
+    LLVMDisposeTargetMachine(target_machine);
+    return 0;
+    // FILE *output_file = fopen(argv[2], "w");
+    // if (!current_file)
+    // {
+    //     printf("Could not open file %s\n", argv[1]);
+    //     return 1;
+    // }
+
+    // // types
+    // LLVMTypeRef int_8_type = LLVMInt8Type();
+    // LLVMTypeRef int_8_type_ptr = LLVMPointerType(int_8_type, 0);
+    // LLVMTypeRef int_32_type = LLVMInt32Type();
+    // LLVMTypeRef double_type = LLVMDoubleType();
+
+    // // LLVMDumpModule(module); // dump module to STDOUT
+    // char *output = LLVMPrintModuleToString(module);
+    // fprintf(output_file, "%s", output);
+    // LLVMDisposeBuilder(builder);
+    // LLVMDisposeModule(module);
+    // LLVMContextDispose(LLVMGetGlobalContext());
+    // return 0;
+}
+
+// int hello_world()
+// {
+
+//     // create context, module and builder
+//     LLVMContextRef context = LLVMContextCreate();
+//     LLVMModuleRef module = LLVMModuleCreateWithNameInContext("hello", context);
+//     LLVMBuilderRef builder = LLVMCreateBuilderInContext(context);
+
+//     LLVMSetTarget(module, target);
+//     // types
+//     LLVMTypeRef int_8_type = LLVMInt8TypeInContext(context);
+//     LLVMTypeRef int_8_type_ptr = LLVMPointerType(int_8_type, 0);
+//     LLVMTypeRef int_8_type_ptr_ptr = LLVMPointerType(int_8_type_ptr, 0);
+//     LLVMTypeRef int_32_type = LLVMInt32TypeInContext(context);
+
+//     // puts function
+//     LLVMTypeRef puts_function_args_type[1] = {int_8_type_ptr};
+
+//     LLVMTypeRef puts_function_type = LLVMFunctionType(int_32_type, puts_function_args_type, 1, false);
+//     LLVMValueRef puts_function = LLVMAddFunction(module, "puts", puts_function_type);
+//     // end
+
+//     // main function
+//     LLVMTypeRef main_function_args_type[2] = {int_32_type, int_8_type_ptr_ptr};
+//     LLVMTypeRef main_function_type = LLVMFunctionType(int_32_type, main_function_args_type, 0, false);
+//     LLVMValueRef main_function = LLVMAddFunction(module, "main", main_function_type);
+
+//     LLVMBasicBlockRef entry = LLVMAppendBasicBlockInContext(context, main_function, "entry");
+//     LLVMPositionBuilderAtEnd(builder, entry);
+
+//     LLVMValueRef puts_function_args[] = {
+//         LLVMBuildPointerCast(builder,                                                  // cast [14 x i8] type to int8 pointer
+//                              LLVMBuildGlobalString(builder, "Hello, World!", "hello"), // build hello string constant
+//                              int_8_type_ptr, "0")};
+
+//     LLVMBuildCall(builder, puts_function, puts_function_args, 1, "i");
+//     LLVMBuildRet(builder, LLVMConstInt(int_32_type, 0, false));
+//     // end
+
+//     // LLVMDumpModule(module); // dump module to STDOUT
+//     char *hello = LLVMPrintModuleToString(module);
+//     FILE *file = fopen("hello.ll", "w");
+//     fprintf(file, "%s", hello);
+
+//     // clean memory
+//     LLVMDisposeBuilder(builder);
+//     LLVMDisposeModule(module);
+//     LLVMContextDispose(context);
+//     return 0;
+// }
