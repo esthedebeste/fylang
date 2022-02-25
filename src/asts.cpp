@@ -3,35 +3,20 @@
 #include <map>
 #include <string>
 #include "utils.cpp"
-struct Type
-{
-    LLVMTypeRef llvm_type;
-    bool is_signed;
-    Type(LLVMTypeRef llvm_type, bool is_signed) : llvm_type(llvm_type), is_signed(is_signed) {}
-};
-struct ValueWithType
-{
-    LLVMValueRef llvm_value;
-    Type *type;
-    ValueWithType(LLVMValueRef llvm_value, Type *type) : llvm_value(llvm_value), type(type) {}
-};
-struct Func
-{
-    Type *return_type;
-    Func(Type *return_type) : return_type(return_type) {}
-};
+#include "types.cpp"
 static LLVMContextRef curr_ctx;
 static LLVMBuilderRef curr_builder;
 static LLVMModuleRef curr_module;
 static LLVMPassManagerRef curr_pass_manager;
+struct ValueWithType
+{
+    LLVMValueRef value;
+    Type *type;
+    ValueWithType(LLVMValueRef value, Type *type) : value(value), type(type) {}
+};
+
 static std::map<std::string, ValueWithType *> curr_named_values;
-static std::map<std::string, Func *> curr_functions;
-static LLVMTypeRef int_1_type = LLVMInt1Type(); // AKA bool
-static LLVMTypeRef int_8_type = LLVMInt8Type(); // AKA byte, char
-static LLVMTypeRef int_8_type_ptr = LLVMPointerType(int_8_type, 0);
-static LLVMTypeRef int_32_type = LLVMInt32Type(); // AKA int
-static LLVMTypeRef float_type = LLVMFloatType();
-static LLVMTypeRef double_type = LLVMDoubleType(); // AKA float64
+static std::map<std::string, FunctionType *> curr_functions;
 
 /// ExprAST - Base class for all expression nodes.
 class ExprAST
@@ -49,30 +34,33 @@ public:
     }
 };
 
-Type *num_char_to_type(char type_char, bool has_dot)
+NumType *num_char_to_type(char type_char, bool has_dot)
 {
     switch (type_char)
     {
     case 'd':
-        return new Type(double_type, true);
+        return new NumType(64, true, true);
     case 'f':
-        return new Type(float_type, true);
+        return new NumType(32, true, true);
     case 'i':
         if (has_dot)
-            error("'i' type can't have a '.'");
-        return new Type(int_32_type, true);
+            error("'i' (int32) type can't have a '.'");
+        return new NumType(32, false, true);
     case 'u':
         if (has_dot)
-            error("'u' type can't have a '.'");
-        return new Type(int_32_type, false);
+            error("'u' (uint32) type can't have a '.'");
+        return new NumType(32, false, false);
+    case 'l':
+        if (has_dot)
+            error("'l' (long, int64) type can't have a '.'");
+        return new NumType(64, false, true);
     case 'b':
         if (has_dot)
-            error("'b' type can't have a '.'");
-        return new Type(int_8_type, false);
+            error("'b' (byte, uint8) type can't have a '.'");
+        return new NumType(8, false, false);
     default:
-        char *str = (char *)"Invalid number type id ' '";
-        str[24] = type_char;
-        error(str);
+        fprintf(stderr, "Error: Invalid number type id '%c'", type_char);
+        exit(1);
         return nullptr;
     }
 }
@@ -81,7 +69,7 @@ class NumberExprAST : public ExprAST
 {
     char *val;
     unsigned int val_len;
-    Type *type;
+    NumType *type;
 
 public:
     NumberExprAST(char *val, unsigned int val_len, char type_char, bool has_dot) : val(val), val_len(val_len)
@@ -94,10 +82,13 @@ public:
     }
     LLVMValueRef codegen()
     {
-        // todo do something with Type
-        return LLVMConstRealOfStringAndSize(double_type, val, val_len);
+        if (type->is_floating)
+            return LLVMConstRealOfStringAndSize(type->llvm_type(), val, val_len);
+        else
+            return LLVMConstIntOfStringAndSize(type->llvm_type(), val, val_len, 10);
     }
 };
+
 /// VariableExprAST - Expression class for referencing a variable, like "a".
 class VariableExprAST : public ExprAST
 {
@@ -122,7 +113,24 @@ public:
         ValueWithType *V = curr_named_values[name];
         if (!V)
             error("non-existent variable");
-        return V->llvm_value;
+        return V->value;
+    }
+};
+
+/// CharExprAST - Expression class for a single char ('a')
+class CharExprAST : public ExprAST
+{
+    char charr;
+
+public:
+    CharExprAST(char charr) : charr(charr) {}
+    Type *get_type()
+    {
+        return new NumType(8, false, false);
+    }
+    LLVMValueRef codegen()
+    {
+        return LLVMConstInt(int_8_type, charr, false);
     }
 };
 
@@ -141,7 +149,7 @@ public:
     {
         Type *lhs_t = LHS->get_type();
         Type *rhs_t = RHS->get_type();
-        if (lhs_t->llvm_type == rhs_t->llvm_type)
+        if (lhs_t->llvm_type() == rhs_t->llvm_type())
         {
             error("binexpr left-hand and right-hand side don't have the same type");
         }
@@ -166,7 +174,7 @@ public:
         case '<':
             L = LLVMBuildFCmp(curr_builder, LLVMRealPredicate::LLVMRealULT, L, R, "cmptmp");
             // Convert bool 0/1 to double 0.0 or 1.0
-            return LLVMBuildUIToFP(curr_builder, L, double_type,
+            return LLVMBuildUIToFP(curr_builder, L, float_64_type,
                                    "booltmp");
         default:
             fprintf(stderr, "Error: invalid binary operator '%c'", op);
@@ -194,10 +202,10 @@ public:
         {
         case '!':
             // shortcut for != 1
-            return LLVMBuildFCmp(curr_builder, LLVMRealONE, operand->codegen(), LLVMConstReal(double_type, 1.0), "nottmp");
+            return LLVMBuildFCmp(curr_builder, LLVMRealONE, operand->codegen(), LLVMConstReal(float_64_type, 1.0), "nottmp");
         case '-':
             // shortcut for 0-n
-            return LLVMBuildFSub(curr_builder, LLVMConstReal(double_type, 0.0), operand->codegen(), "negtmp");
+            return LLVMBuildFSub(curr_builder, LLVMConstReal(float_64_type, 0.0), operand->codegen(), "negtmp");
         default:
             fprintf(stderr, "Error: invalid unary operator '%c'", op);
             exit(1);
@@ -218,7 +226,7 @@ public:
 
     Type *get_type()
     {
-        Func *func = curr_functions[std::string(callee)];
+        FunctionType *func = curr_functions[std::string(callee)];
         if (!func)
         {
             fprintf(stderr, "Error: Function '%s' doesn't exist", callee);
@@ -281,44 +289,43 @@ class PrototypeAST
 {
 
 public:
-    char **args;
+    char **arg_names;
+    unsigned int *arg_name_lengths;
     Type **arg_types;
-    Func *type;
-    unsigned int *arg_lengths;
+    Type *return_type;
+    FunctionType *type;
     unsigned int arg_count;
     char *name;
     unsigned int name_len;
     PrototypeAST(char *name, unsigned int name_len,
-                 char **args, unsigned int *arg_lengths,
-                 char **arg_type_strs, unsigned int *arg_type_lengths,
-                 char *return_type,
-                 unsigned int return_type_len, // if set to 0, return type assumed from function body
-                 unsigned int args_len)
-        : name(name), name_len(name_len), args(args), arg_count(args_len)
+                 char **arg_names, unsigned int *arg_name_lengths,
+                 Type **arg_types,
+                 unsigned int args_len,
+                 Type *return_type)
+        : name(name), name_len(name_len), arg_names(arg_names), arg_name_lengths(arg_name_lengths), arg_types(arg_types), arg_count(args_len), return_type(return_type)
     {
-        // todo: parse arg_type_strs and possibly return_type (new function and possibly new AST)
-        type = curr_functions[std::string(name)] = new Func(num_char_to_type('d', true));
+        type = curr_functions[std::string(name)] = new FunctionType(return_type, arg_types, args_len);
     }
-    Func *get_type()
+    FunctionType *get_type()
     {
         return type;
     }
     LLVMValueRef codegen()
     {
         // Make the function type:  double(double,double) etc.
-        LLVMTypeRef *doubles = (LLVMTypeRef *)calloc(arg_count, sizeof(LLVMTypeRef *));
+        LLVMTypeRef *llvm_arg_types = (LLVMTypeRef *)calloc(arg_count, sizeof(LLVMTypeRef));
         for (unsigned i = 0; i != arg_count; ++i)
-            doubles[i] = double_type;
+            llvm_arg_types[i] = arg_types[i]->llvm_type();
         LLVMTypeRef function_type =
-            LLVMFunctionType(double_type, doubles, arg_count, false);
+            LLVMFunctionType(return_type->llvm_type(), llvm_arg_types, arg_count, false);
 
         LLVMValueRef func =
             LLVMAddFunction(curr_module, name, function_type);
         // Set names for all arguments.
-        LLVMValueRef *params = (LLVMValueRef *)calloc(arg_count, sizeof(LLVMValueRef *));
+        LLVMValueRef *params = (LLVMValueRef *)calloc(arg_count, sizeof(LLVMValueRef));
         LLVMGetParams(func, params);
         for (unsigned i = 0; i != arg_count; ++i)
-            LLVMSetValueName2(params[i], args[i], strlen(args[i]));
+            LLVMSetValueName2(params[i], arg_names[i], arg_name_lengths[i]);
 
         LLVMSetValueName2(func, name, name_len);
         return func;
@@ -410,7 +417,7 @@ public:
     {
         Type *then_t = then->get_type();
         Type *else_t = elze->get_type();
-        if (then_t->llvm_type == else_t->llvm_type)
+        if (!then_t->eq(else_t))
         {
             error("if then and else side don't have the same type");
         }
@@ -420,7 +427,7 @@ public:
     LLVMValueRef codegen()
     {
         LLVMValueRef cond_v = cond->codegen();
-        cond_v = LLVMBuildFCmp(curr_builder, LLVMRealONE, cond_v, LLVMConstReal(double_type, 0.0), "ifcond");
+        cond_v = LLVMBuildFCmp(curr_builder, LLVMRealONE, cond_v, LLVMConstReal(float_64_type, 0.0), "ifcond");
         LLVMValueRef func = LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder));
 
         LLVMBasicBlockRef then_bb = LLVMAppendBasicBlockInContext(curr_ctx, func, "then");
@@ -444,7 +451,7 @@ public:
         // merge
         LLVMAppendExistingBasicBlock(func, merge_bb);
         LLVMPositionBuilderAtEnd(curr_builder, merge_bb);
-        LLVMValueRef phi = LLVMBuildPhi(curr_builder, double_type, "iftmp");
+        LLVMValueRef phi = LLVMBuildPhi(curr_builder, float_64_type, "iftmp");
         // todo merge idk
         LLVMAddIncoming(phi, &then_v, &then_bb, 1);
         LLVMAddIncoming(phi, &else_v, &else_bb, 1);

@@ -1,21 +1,19 @@
 mkdir bin -p
 rm -rf bin/*
 cd ./bin
-clang++ -c ../src/fy-std.cpp -o ./fy-std.o -fuse-ld=lld 
+clang++ -c ../src/fy-std.cpp -o ./fy-std.o
 echo " - Compiled fy-std"
-clang++ ../src/main.cpp -o ./fylang.ll -emit-llvm -S &&
+clang++ ../src/main.cpp -o ./fylang  -lLLVM -lstdc++ -fuse-ld=lld &&
 echo "
- - Compiled" &&
-clang ./fylang.ll -o ./fylang -lLLVM -lstdc++ -fuse-ld=lld &&
-echo "
- - Linked" &&
+ - Compiled fylang" &&
 ./fylang ../hello.fy ./hello.ll &&
 echo "
- - Executed" &&
+ - Compiled hello.fy" &&
+# Link and compile hello.ll with LLVM and c std
 clang ./hello.ll ./fy-std.o -o ./hello -lLLVM -lstdc++ -fuse-ld=lld &&
 echo "
- - Linked" &&
+ - Linked hello.ll" &&
 ./hello
 echo "
- - Executed with exit code $?"
+ - Executed hello with exit code $?"
 cd ..

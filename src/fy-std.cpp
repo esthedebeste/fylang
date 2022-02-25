@@ -1,4 +1,6 @@
 /// --- FYLANG STD --- ///
+/// this exists apart from the main compiler.
+/// provides some convenience functions.
 
 #ifdef _WIN32
 #define DLLEXPORT __declspec(dllexport)
@@ -9,11 +11,11 @@
 
 extern "C"
 {
-    /// putchard - putchar that takes a double and returns 0.
-    DLLEXPORT double putchard(double X)
+    /// putchard - putchar that takes a double and returns it as a char.
+    DLLEXPORT char putchard(double X)
     {
         fputc((char)X, stderr);
-        return 0;
+        return X;
     }
 
     /// printd - printf that takes a double prints it as "%f\n", returning 0.
@@ -24,9 +26,8 @@ extern "C"
     }
 
     /// int_floor - takes a double and returns it in int format (floored)
-    /// math won't work anymore, exclusively using this for main's return.
-    DLLEXPORT int intfloor(double X)
+    DLLEXPORT int int_floor(double X)
     {
-        return (int)X;
+        return X;
     }
 }

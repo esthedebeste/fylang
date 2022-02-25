@@ -13,6 +13,7 @@ extern "C"
 #include <malloc.h>
 #include "asts.cpp"
 #include "utils.cpp"
+#include "types.cpp"
 
 FILE *current_file;
 static int next_char()
@@ -102,6 +103,24 @@ static bool is_alphaish(char c)
 {
     return isalpha(c) || c == '_';
 }
+static char get_escape(char escape_char)
+{
+    switch (escape_char)
+    {
+    case 'n':
+        return '\n';
+    case 'r':
+        return '\r';
+    case 't':
+        return '\t';
+    case '0':
+        return '\0';
+    default:
+        fprintf(stderr, "Invalid escape '\\%c'", escape_char);
+        return NULL;
+    }
+}
+
 // Returns a token, or a number of the token's ASCII value.
 static int next_token()
 {
@@ -135,7 +154,14 @@ static int next_token()
             last_char = next_char();
         }
         else
-            num_type = 'd';
+        {
+            // if floating-point, default to double (float64)
+            if (num_has_dot)
+                num_type = 'd';
+            // if not floating-point, default to long (int64)
+            else
+                num_type = 'l';
+        }
         return T_NUMBER;
     }
     else if (last_char == '"')
@@ -155,12 +181,14 @@ static int next_token()
     }
     else if (last_char == '\'')
     {
-        // TODO: implement chars as i8 type
         // Char: '[^']'
-        next_char(); // eat '
+        last_char = next_char(); // eat '
         if (last_char == EOF || last_char == '\n' || last_char == '\r')
             error("Unterminated char\n");
-        char_value = next_char();
+        if (last_char == '\\')
+            char_value = get_escape(next_char());
+        else
+            char_value = last_char;
         if (next_char() != '\'') // eat '
             error("char with length above 1");
         last_char = next_char();
@@ -201,10 +229,76 @@ static int eat(int expected_token, char *exp_name = nullptr)
 static std::unique_ptr<ExprAST> parse_expr();
 static std::unique_ptr<ExprAST> parse_primary();
 
+static Type *parse_type();
+static Type *parse_type_unary()
+{
+    // If the current token is not a unary type operator, just parse type
+    if (!(curr_token == '&' || curr_token == '*'))
+        return parse_type();
+
+    // If this is a unary operator, read it.
+    int opc = curr_token;
+    get_next_token();
+    if (Type *operand = parse_type_unary())
+    {
+        if (opc == '*')
+            return (Type *)new PointerType(operand);
+        else if (opc == '&')
+        {
+            if (PointerType *ptr = dynamic_cast<PointerType *>(operand))
+                return ptr->get_points_to();
+            else
+                error("use of & type operator without pointer on right-hand side");
+        }
+    }
+    return nullptr;
+}
+
+static Type *parse_type()
+{
+    bool is_signed = true;
+    while (1)
+    {
+        char *id = identifier_string;
+        unsigned int id_len = identifier_string_length;
+        eat(T_IDENTIFIER, (char *)"identifier");
+        if (streq(id, id_len, "unsigned", 8))
+            is_signed = false;
+        // starts with "int"
+        if (id_len >= 3 && streq(id, 3, "int", 3))
+            if (id_len > 3)
+                return new NumType(id + 3, id_len - 3, false, is_signed);
+            else
+                return new NumType(32, false, false);
+        // starts with "float"
+        else if (id_len >= 5 && streq(id, 5, "float", 5))
+            if (!is_signed)
+                error("unsigned floats don't exist");
+            else if (id_len > 5)
+                return new NumType(id + 5, id_len - 5, true, true);
+            else
+                return new NumType(32, true, true);
+        else if (streq(id, id_len, "double", 6))
+            return new NumType(64, true, true);
+        else if (streq(id, id_len, "byte", 4) || streq(id, id_len, "char", 4))
+            return new NumType(8, false, is_signed);
+        else if (streq(id, id_len, "long", 4))
+            return new NumType(64, false, is_signed);
+        else if (streq(id, id_len, "bool", 4))
+            return new NumType(1, false, false);
+    }
+}
+
 static std::unique_ptr<ExprAST> parse_number_expr()
 {
     auto result = std::make_unique<NumberExprAST>(num_value, num_length, num_type, num_has_dot);
     get_next_token(); // consume the number
+    return std::move(result);
+}
+static std::unique_ptr<ExprAST> parse_char_expr()
+{
+    auto result = std::make_unique<CharExprAST>(char_value);
+    get_next_token(); // consume char
     return std::move(result);
 }
 /// parenexpr ::= '(' expression ')'
@@ -302,6 +396,8 @@ static std::unique_ptr<ExprAST> parse_primary()
         return parse_identifier_expr();
     case T_NUMBER:
         return parse_number_expr();
+    case T_CHAR:
+        return parse_char_expr();
     case '(':
         return parse_paren_expr();
     case T_IF:
@@ -397,8 +493,7 @@ static std::unique_ptr<PrototypeAST> parse_prototype()
     // Read the list of argument names.
     char **arg_names = (char **)malloc(256);
     unsigned int *arg_name_lens = (unsigned int *)malloc(256);
-    char **arg_types = (char **)malloc(256);
-    unsigned int *arg_type_lens = (unsigned int *)malloc(256);
+    Type **arg_types = (Type **)malloc(256);
     unsigned int arg_count = 0;
 
     get_next_token();
@@ -409,9 +504,7 @@ static std::unique_ptr<PrototypeAST> parse_prototype()
             arg_name_lens[arg_count] = identifier_string_length;
             eat(T_IDENTIFIER, (char *)"identifier");
             eat(':');
-            arg_types[arg_count] = identifier_string;
-            arg_type_lens[arg_count] = identifier_string_length;
-            eat(T_IDENTIFIER, (char *)"identifier");
+            arg_types[arg_count] = parse_type_unary();
             arg_count++;
             if (curr_token == ')')
                 break;
@@ -420,17 +513,16 @@ static std::unique_ptr<PrototypeAST> parse_prototype()
             get_next_token();
         }
     eat(')');
-    char *return_type;
-    unsigned int return_type_len = 0;
+    Type *return_type;
     if (curr_token == ':')
     {
         eat(':');
-        eat(T_IDENTIFIER, (char *)"identifier");
-        return_type = identifier_string;
-        return_type_len = identifier_string_length;
+        return_type = parse_type_unary();
     }
+    else
+        return_type = new NumType(64, true, true);
 
-    return std::make_unique<PrototypeAST>(fn_name, fn_name_len, arg_names, arg_name_lens, arg_types, arg_type_lens, return_type, return_type_len, arg_count);
+    return std::make_unique<PrototypeAST>(fn_name, fn_name_len, arg_names, arg_name_lens, arg_types, arg_count, return_type);
 }
 
 /// definition ::= 'fun' prototype expression
