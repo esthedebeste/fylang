@@ -16,7 +16,7 @@ static unsigned int parse_pos_int(char *num_str, unsigned int num_str_len, unsig
 {
     unsigned int result = 0;
     for (unsigned int i = 0; i < num_str_len; i++)
-        result = result * base + num_str[i] - '0';
+        result = result * base + (num_str[i] > '9' ? num_str[i] >= 'A' ? num_str[i] - 'A' + 10 : num_str[i] - 'a' + 10 : num_str[i] - '0');
     return result;
 }
 void error(const char *str)

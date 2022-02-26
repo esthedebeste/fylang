@@ -8,14 +8,9 @@ static LLVMContextRef curr_ctx;
 static LLVMBuilderRef curr_builder;
 static LLVMModuleRef curr_module;
 static LLVMPassManagerRef curr_pass_manager;
-struct ValueWithType
-{
-    LLVMValueRef value;
-    Type *type;
-    ValueWithType(LLVMValueRef value, Type *type) : value(value), type(type) {}
-};
 
-static std::map<std::string, ValueWithType *> curr_named_values;
+static std::map<std::string, LLVMValueRef> curr_named_values;
+static std::map<std::string, Type *> curr_named_var_types;
 static std::map<std::string, FunctionType *> curr_functions;
 
 /// ExprAST - Base class for all expression nodes.
@@ -69,10 +64,11 @@ class NumberExprAST : public ExprAST
 {
     char *val;
     unsigned int val_len;
+    unsigned int base;
     NumType *type;
 
 public:
-    NumberExprAST(char *val, unsigned int val_len, char type_char, bool has_dot) : val(val), val_len(val_len)
+    NumberExprAST(char *val, unsigned int val_len, char type_char, bool has_dot, unsigned int base) : val(val), val_len(val_len), base(base)
     {
         type = num_char_to_type(type_char, has_dot);
     }
@@ -83,9 +79,15 @@ public:
     LLVMValueRef codegen()
     {
         if (type->is_floating)
-            return LLVMConstRealOfStringAndSize(type->llvm_type(), val, val_len);
+            if (base != 10)
+            {
+                error("floating-point numbers with a base that isn't decimal aren't supported.");
+                return nullptr;
+            }
+            else
+                return LLVMConstRealOfStringAndSize(type->llvm_type(), val, val_len);
         else
-            return LLVMConstIntOfStringAndSize(type->llvm_type(), val, val_len, 10);
+            return LLVMConstIntOfStringAndSize(type->llvm_type(), val, val_len, base);
     }
 };
 
@@ -99,21 +101,50 @@ public:
     VariableExprAST(char *name, unsigned int name_len) : name(name), name_len(name_len) {}
     Type *get_type()
     {
-        ValueWithType *V = curr_named_values[name];
-        if (!V)
+        Type *T = curr_named_var_types[name];
+        if (!T)
         {
             fprintf(stderr, "Variable '%s' doesn't exist.", name);
             exit(1);
         }
-        return curr_named_values[name]->type;
+        return T;
     }
     LLVMValueRef codegen()
     {
-        // Look this variable up in the function.
-        ValueWithType *V = curr_named_values[name];
+        LLVMValueRef V = curr_named_values[name];
         if (!V)
             error("non-existent variable");
-        return V->value;
+        return V;
+    }
+};
+
+/// LetExprAST - Expression class for creating a variable, like "let a = 3".
+class LetExprAST : public ExprAST
+{
+    char *id;
+    unsigned int id_len;
+    Type *type;
+    std::unique_ptr<ExprAST> value;
+
+public:
+    LetExprAST(char *id, unsigned int id_len, Type *type, std::unique_ptr<ExprAST> value) : id(id), id_len(id_len), type(type)
+    {
+        if (type)
+            curr_named_var_types[std::string(id, id_len)] = type;
+        else
+            curr_named_var_types[std::string(id, id_len)] = value->get_type();
+        this->value = std::move(value);
+    }
+    Type *get_type()
+    {
+        return type;
+    }
+    LLVMValueRef codegen()
+    {
+        LLVMValueRef llvm_val = value->codegen();
+        LLVMSetValueName2(llvm_val, id, id_len);
+        curr_named_values[std::string(id, id_len)] = llvm_val;
+        return llvm_val;
     }
 };
 
@@ -134,6 +165,52 @@ public:
     }
 };
 
+enum StringType
+{
+    C_STYLE_STRING = 0 // '\0'-terminated, pointer
+};
+/// StringExprAST - Expression class for multiple chars ("hello")
+class StringExprAST : public ExprAST
+{
+    char *chars;
+    unsigned int length;
+    StringType string_type;
+
+public:
+    StringExprAST(char *chars, unsigned int length, StringType string_type) : chars(chars), length(length), string_type(string_type)
+    {
+        if (string_type == C_STYLE_STRING && chars[length - 1] != '\0')
+            error("C-style strings should be fed into StringExprAST including the last null-byte");
+    }
+    Type *get_type()
+    {
+        switch (string_type)
+        {
+        case C_STYLE_STRING:
+            return (Type *)new PointerType(new NumType(8, false, false));
+        default:
+            fprintf(stderr, "Error: Unimplemented string type %d", string_type);
+            exit(1);
+            return nullptr;
+        }
+    }
+    LLVMValueRef codegen()
+    {
+        // LLVMValueRef string_value = LLVMBuildGlobalString(curr_builder, chars, "str");
+        switch (string_type)
+        {
+        case C_STYLE_STRING:
+        {
+            return LLVMBuildGlobalStringPtr(curr_builder, chars, "cstr");
+        }
+        default:
+            fprintf(stderr, "Error: Unimplemented string type %d", string_type);
+            exit(1);
+            return nullptr;
+        }
+    }
+};
+
 /// BinaryExprAST - Expression class for a binary operator.
 class BinaryExprAST : public ExprAST
 {
@@ -149,36 +226,60 @@ public:
     {
         Type *lhs_t = LHS->get_type();
         Type *rhs_t = RHS->get_type();
-        if (lhs_t->llvm_type() == rhs_t->llvm_type())
-        {
+        if (lhs_t->llvm_type() != rhs_t->llvm_type())
             error("binexpr left-hand and right-hand side don't have the same type");
-        }
         return lhs_t;
     }
     LLVMValueRef codegen()
     {
         LLVMValueRef L = LHS->codegen();
         LLVMValueRef R = RHS->codegen();
+        NumType *type = dynamic_cast<NumType *>(get_type());
+        if (!type)
+            error("pointer-ops aren't implemented yet");
+
         if (!L || !R)
             return nullptr;
 
-        // todo do something with type
-        switch (op)
+        if (type->is_floating)
+            switch (op)
+            {
+            case '+':
+                return LLVMBuildFAdd(curr_builder, L, R, "faddtmp");
+            case '-':
+                return LLVMBuildFSub(curr_builder, L, R, "fsubtmp");
+            case '*':
+                return LLVMBuildFMul(curr_builder, L, R, "fmultmp");
+            case '<':
+                L = LLVMBuildFCmp(curr_builder, LLVMRealPredicate::LLVMRealULT, L, R, "fcmptmp");
+                // Convert bool 0/1 to 0.0 or 1.0
+                return LLVMBuildUIToFP(curr_builder, L, type->llvm_type(), "booltmp");
+            default:
+                fprintf(stderr, "Error: invalid binary operator '%c'", op);
+                exit(1);
+            }
+        else
         {
-        case '+':
-            return LLVMBuildFAdd(curr_builder, L, R, "addtmp");
-        case '-':
-            return LLVMBuildFSub(curr_builder, L, R, "subtmp");
-        case '*':
-            return LLVMBuildFMul(curr_builder, L, R, "multmp");
-        case '<':
-            L = LLVMBuildFCmp(curr_builder, LLVMRealPredicate::LLVMRealULT, L, R, "cmptmp");
-            // Convert bool 0/1 to double 0.0 or 1.0
-            return LLVMBuildUIToFP(curr_builder, L, float_64_type,
-                                   "booltmp");
-        default:
-            fprintf(stderr, "Error: invalid binary operator '%c'", op);
-            exit(1);
+
+            switch (op)
+            {
+            case '+':
+                return LLVMBuildAdd(curr_builder, L, R, "iaddtmp");
+            case '-':
+                return LLVMBuildSub(curr_builder, L, R, "isubtmp");
+            case '*':
+                return LLVMBuildMul(curr_builder, L, R, "imultmp");
+            case '<':
+                L = LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntULT, L, R, "fcmptmp");
+                if (type->bits == 1)
+                    return L;
+                else
+                    // Convert bool 0/1 to 0 or 1
+                    return LLVMBuildIntCast2(curr_builder, L, type->llvm_type(), type->is_signed, "booltmp");
+            default:
+                fprintf(stderr, "Error: invalid binary operator '%c'", op);
+                exit(1);
+            }
         }
     }
 };
@@ -226,7 +327,7 @@ public:
 
     Type *get_type()
     {
-        FunctionType *func = curr_functions[std::string(callee)];
+        FunctionType *func = curr_functions[std::string(callee, callee_len)];
         if (!func)
         {
             fprintf(stderr, "Error: Function '%s' doesn't exist", callee);
@@ -252,7 +353,7 @@ public:
         {
             args_v[i] = args[i]->codegen();
         }
-        // TODO: update to LLVMBuildCall2 by getting function type somehow
+        // todo update to llvmbuildcall2
         return LLVMBuildCall(curr_builder, callee_f, args_v, args_v_len, "calltmp");
     }
 };
@@ -304,6 +405,8 @@ public:
                  Type *return_type)
         : name(name), name_len(name_len), arg_names(arg_names), arg_name_lengths(arg_name_lengths), arg_types(arg_types), arg_count(args_len), return_type(return_type)
     {
+        for (unsigned i = 0; i != arg_count; ++i)
+            curr_named_var_types[std::string(arg_names[i], arg_name_lengths[i])] = arg_types[i];
         type = curr_functions[std::string(name)] = new FunctionType(return_type, arg_types, args_len);
     }
     FunctionType *get_type()
@@ -315,7 +418,9 @@ public:
         // Make the function type:  double(double,double) etc.
         LLVMTypeRef *llvm_arg_types = (LLVMTypeRef *)calloc(arg_count, sizeof(LLVMTypeRef));
         for (unsigned i = 0; i != arg_count; ++i)
+        {
             llvm_arg_types[i] = arg_types[i]->llvm_type();
+        }
         LLVMTypeRef function_type =
             LLVMFunctionType(return_type->llvm_type(), llvm_arg_types, arg_count, false);
 
@@ -348,8 +453,11 @@ class FunctionAST
 public:
     FunctionAST(std::unique_ptr<PrototypeAST> proto,
                 std::unique_ptr<ExprAST> body)
-        : proto(std::move(proto)), body(std::move(body))
     {
+        if (proto->return_type == nullptr)
+            proto->return_type = body->get_type();
+        this->proto = std::move(proto);
+        this->body = std::move(body);
     }
 
     LLVMValueRef codegen()
@@ -368,14 +476,13 @@ public:
 
         auto block = LLVMAppendBasicBlockInContext(curr_ctx, func, "");
         LLVMPositionBuilderAtEnd(curr_builder, block);
-        curr_named_values.clear();
 
         unsigned int args_len = LLVMCountParams(func);
         LLVMValueRef *params = (LLVMValueRef *)calloc(args_len, sizeof(LLVMValueRef *));
         LLVMGetParams(func, params);
         size_t unused = 0;
         for (unsigned i = 0; i != args_len; ++i)
-            curr_named_values[LLVMGetValueName2(params[i], &unused)] = new ValueWithType(params[i], proto->arg_types[i]);
+            curr_named_values[LLVMGetValueName2(params[i], &unused)] = params[i];
         if (LLVMValueRef ret_val = body->codegen())
         {
             // Finish off the function.
@@ -385,8 +492,10 @@ public:
             // // Validate the generated code, checking for consistency.
             // // verifyFunction(*TheFunction);
 
+            curr_named_values.clear();
             return func;
         }
+        curr_named_values.clear();
         // Error reading body, remove function.
         LLVMDeleteFunction(func);
         return nullptr;
@@ -427,7 +536,9 @@ public:
     LLVMValueRef codegen()
     {
         LLVMValueRef cond_v = cond->codegen();
-        cond_v = LLVMBuildFCmp(curr_builder, LLVMRealONE, cond_v, LLVMConstReal(float_64_type, 0.0), "ifcond");
+        if (NumType *n = dynamic_cast<NumType *>(cond->get_type()))
+            if (n->is_floating)
+                cond_v = LLVMBuildFCmp(curr_builder, LLVMRealONE, cond_v, LLVMConstReal(float_64_type, 0.0), "ifcond");
         LLVMValueRef func = LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder));
 
         LLVMBasicBlockRef then_bb = LLVMAppendBasicBlockInContext(curr_ctx, func, "then");

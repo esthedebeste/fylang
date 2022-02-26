@@ -27,7 +27,10 @@ static int next_char()
         p = buf;
     }
     char ret = n-- > 0 ? *p++ : EOF;
-    fputc(ret, stderr);
+    if (ret == EOF)
+        fputs("[EOF]", stderr);
+    else
+        fputc(ret, stderr);
     return ret;
 }
 /// --- BEGIN LEXER --- ///
@@ -43,6 +46,7 @@ const int T_WHILE = -9;      // while
 const int T_RETURN = -10;    // return
 const int T_FUNCTION = -11;  // fun
 const int T_EXTERN = -12;    // extern
+const int T_LET = -13;       // let
 static unsigned int identifier_string_length;
 static char *identifier_string;    // [a-zA-Z][a-zA-Z0-9]* - Filled in if T_IDENTIFIER
 static char char_value;            // '[^']' - Filled in if T_CHAR
@@ -52,6 +56,7 @@ static bool num_has_dot;           // Whether num_value contains '.' - Filled in
 static char num_type;              // Type of number. 'd' => double, 'f' => float, 'i' => int32, 'u' => uint32, 'b' => byte/char/uint8
 static char *string_value;         // "[^"]*" - Filled in if T_STRING
 static unsigned int string_length; // len(string_value) - Filled in if T_STRING
+static char string_type;           // 'c' - Filled in if T_STRING
 
 static int last_char = ' ';
 static void read_str(bool (*predicate)(char), char **output, unsigned int *length)
@@ -113,11 +118,17 @@ static char get_escape(char escape_char)
         return '\r';
     case 't':
         return '\t';
+    case '\'':
+        return '\'';
+    case '"':
+        return '"';
+    case '\\':
+        return '\\';
     case '0':
         return '\0';
     default:
         fprintf(stderr, "Invalid escape '\\%c'", escape_char);
-        return NULL;
+        return '\0';
     }
 }
 
@@ -141,6 +152,8 @@ static int next_token()
             return T_IF;
         else if (streq(identifier_string, identifier_string_length, "else", 4))
             return T_ELSE;
+        else if (streq(identifier_string, identifier_string_length, "let", 3))
+            return T_LET;
         return T_IDENTIFIER;
     }
     else if (isdigit(last_char) || last_char == '.')
@@ -166,9 +179,36 @@ static int next_token()
     }
     else if (last_char == '"')
     {
-        // TODO: implement strings as [ n x i8 ] type
-        // String: "[^"]*"
-        read_str(&isnt_quot, &string_value, &string_length);
+        // String: "[^"]*"c?
+        unsigned int curr_size = 512;
+        char *str = (char *)malloc(curr_size);
+        static unsigned int str_len = 0;
+        while ((last_char = next_char()) != '"')
+        {
+            if (str_len > curr_size)
+            {
+                curr_size *= 2;
+                str = (char *)realloc(str, curr_size);
+            }
+            if (last_char == '\\')
+                str[str_len] = get_escape(next_char());
+            else
+                str[str_len] = last_char;
+            str_len++;
+        }
+        last_char = next_char();
+        {
+            // todo: figure out other types of strings?
+            if (last_char != 'c')
+                error("expected 'c' after string literal");
+            string_type = 'c';
+            str[str_len] = '\0';
+            str_len++;
+        }
+        str = (char *)realloc(str, str_len + 1);
+        string_value = str;
+        string_length = str_len;
+        last_char = next_char();
         return T_STRING;
     }
     else if (last_char == '#')
@@ -196,6 +236,7 @@ static int next_token()
     }
 
     // Otherwise, just return the character as its ascii value.
+    // TODO: multi-char (bin)ops (==, >>, <<)
     int curr_char = last_char;
     last_char = next_char();
     return curr_char;
@@ -242,7 +283,7 @@ static Type *parse_type_unary()
     if (Type *operand = parse_type_unary())
     {
         if (opc == '*')
-            return (Type *)new PointerType(operand);
+            return new PointerType(operand);
         else if (opc == '&')
         {
             if (PointerType *ptr = dynamic_cast<PointerType *>(operand))
@@ -265,7 +306,7 @@ static Type *parse_type()
         if (streq(id, id_len, "unsigned", 8))
             is_signed = false;
         // starts with "int"
-        if (id_len >= 3 && streq(id, 3, "int", 3))
+        else if (id_len >= 3 && streq(id, 3, "int", 3))
             if (id_len > 3)
                 return new NumType(id + 3, id_len - 3, false, is_signed);
             else
@@ -291,7 +332,8 @@ static Type *parse_type()
 
 static std::unique_ptr<ExprAST> parse_number_expr()
 {
-    auto result = std::make_unique<NumberExprAST>(num_value, num_length, num_type, num_has_dot);
+    // TODO: parse number base (hex 0x, binary 0b, octal 0o)
+    auto result = std::make_unique<NumberExprAST>(num_value, num_length, num_type, num_has_dot, 10);
     get_next_token(); // consume the number
     return std::move(result);
 }
@@ -299,6 +341,14 @@ static std::unique_ptr<ExprAST> parse_char_expr()
 {
     auto result = std::make_unique<CharExprAST>(char_value);
     get_next_token(); // consume char
+    return std::move(result);
+}
+static std::unique_ptr<ExprAST> parse_string_expr()
+{
+    if (string_type != 'c')
+        error("string types that aren't 'c' not implemented yet");
+    auto result = std::make_unique<StringExprAST>(string_value, string_length, StringType::C_STYLE_STRING);
+    get_next_token(); // consume string
     return std::move(result);
 }
 /// parenexpr ::= '(' expression ')'
@@ -381,6 +431,25 @@ static std::unique_ptr<ExprAST> parse_block()
     return std::make_unique<BlockExprAST>(exprs, expr_i);
 }
 
+static std::unique_ptr<ExprAST> parse_let_expr()
+{
+    eat(T_LET, (char *)"let");
+    char *id = identifier_string;
+    unsigned int id_len = identifier_string_length;
+    Type *type = nullptr;
+    eat(T_IDENTIFIER, (char *)"variable name");
+    // explicit typing
+    if (curr_token == ':')
+    {
+        eat(':');
+        type = parse_type_unary();
+    }
+    eat('=');
+    std::unique_ptr<ExprAST> value = parse_expr();
+
+    return std::make_unique<LetExprAST>(id, id_len, type, std::move(value));
+}
+
 /// primary
 ///   ::= identifierexpr
 ///   ::= numberexpr
@@ -390,7 +459,7 @@ static std::unique_ptr<ExprAST> parse_primary()
     switch (curr_token)
     {
     default:
-        fprintf(stderr, "unknown token '%c' (%d) when expecting an expression", curr_token, curr_token);
+        fprintf(stderr, "Error: unknown token '%c' (%d) when expecting an expression", curr_token, curr_token);
         exit(1);
     case T_IDENTIFIER:
         return parse_identifier_expr();
@@ -398,10 +467,14 @@ static std::unique_ptr<ExprAST> parse_primary()
         return parse_number_expr();
     case T_CHAR:
         return parse_char_expr();
+    case T_STRING:
+        return parse_string_expr();
     case '(':
         return parse_paren_expr();
     case T_IF:
         return parse_if_expr();
+    case T_LET:
+        return parse_let_expr();
     case '{':
         return parse_block();
     }
@@ -478,7 +551,7 @@ static std::unique_ptr<ExprAST> parse_expr()
 }
 /// prototype
 ///   ::= id '(' id* ')'
-static std::unique_ptr<PrototypeAST> parse_prototype()
+static std::unique_ptr<PrototypeAST> parse_prototype(Type *default_return_type = nullptr)
 {
     char *fn_name = identifier_string;
     unsigned int fn_name_len = identifier_string_length;
@@ -520,7 +593,7 @@ static std::unique_ptr<PrototypeAST> parse_prototype()
         return_type = parse_type_unary();
     }
     else
-        return_type = new NumType(64, true, true);
+        return_type = default_return_type;
 
     return std::make_unique<PrototypeAST>(fn_name, fn_name_len, arg_names, arg_name_lens, arg_types, arg_count, return_type);
 }
@@ -529,7 +602,7 @@ static std::unique_ptr<PrototypeAST> parse_prototype()
 static std::unique_ptr<FunctionAST> parse_definition()
 {
     eat(T_FUNCTION, (char *)"fun");
-    auto proto = parse_prototype();
+    auto proto = parse_prototype(nullptr /* assume from body */);
 
     auto e = parse_expr();
     return std::make_unique<FunctionAST>(std::move(proto), std::move(e));
@@ -538,7 +611,7 @@ static std::unique_ptr<FunctionAST> parse_definition()
 static std::unique_ptr<PrototypeAST> parse_extern()
 {
     eat(T_EXTERN, (char *)"extern"); // eat extern.
-    return parse_prototype();
+    return parse_prototype(new NumType(64, false, false));
 }
 // /// toplevelexpr ::= expression
 // static std::unique_ptr<FunctionAST> parse_top_level_expr()
@@ -575,18 +648,6 @@ static void handle_extern()
         get_next_token();
 }
 
-// static void handle_top_level_expr()
-// {
-//     // Evaluate a top-level expression into an anonymous function.
-//     if (auto ast = parse_top_level_expr())
-//     {
-//         fprintf(stderr, "Parsed a top-level expr\n");
-//         ast->print_codegen_to(stderr);
-//     }
-//     else
-//         // Skip token for error recovery.
-//         get_next_token();
-// }
 /// top ::= definition | external | expression | ';'
 static void main_loop()
 {
@@ -607,7 +668,6 @@ static void main_loop()
             handle_extern();
             break;
         default:
-            // handle_top_level_expr();
             fprintf(stderr, "Unexpected token '%c' (%d) at top-level", curr_token, curr_token);
             exit(1);
             break;
@@ -640,19 +700,26 @@ int main(int argc, char **argv)
     char *host_cpu_name = LLVMGetHostCPUName();
     char *host_cpu_features = LLVMGetHostCPUFeatures();
     LLVMTargetMachineRef target_machine = LLVMCreateTargetMachine(target, target_triple, host_cpu_name, host_cpu_features, LLVMCodeGenLevelAggressive, LLVMRelocStatic, LLVMCodeModelSmall);
+    // create module
     curr_module = LLVMModuleCreateWithName(argv[1]);
+    // set target to current machine
     LLVMSetTarget(curr_module, target_triple);
+    // create builder, context, and pass manager (for optimization)
     curr_builder = LLVMCreateBuilder();
     curr_ctx = LLVMGetGlobalContext();
     curr_pass_manager = LLVMCreateFunctionPassManagerForModule(curr_module);
     LLVMAddAnalysisPasses(target_machine, curr_pass_manager);
     LLVMInitializeFunctionPassManager(curr_pass_manager);
+
+    // open .fy file
     current_file = fopen(argv[1], "r");
-    FILE *output_file = fopen(argv[2], "w");
+    // parse and compile everything into LLVM IR
     main_loop();
+    // export LLVM IR into other file
     char *output = LLVMPrintModuleToString(curr_module);
+    FILE *output_file = fopen(argv[2], "w");
     fprintf(output_file, "%s", output);
-    // dispose
+    // dispose of a bunch of stuff
     LLVMDisposeMessage(output);
     LLVMFinalizeFunctionPassManager(curr_pass_manager);
     LLVMDisposeModule(curr_module);
@@ -663,75 +730,4 @@ int main(int argc, char **argv)
     LLVMDisposeMessage(host_cpu_features);
     LLVMDisposeTargetMachine(target_machine);
     return 0;
-    // FILE *output_file = fopen(argv[2], "w");
-    // if (!current_file)
-    // {
-    //     printf("Could not open file %s\n", argv[1]);
-    //     return 1;
-    // }
-
-    // // types
-    // LLVMTypeRef int_8_type = LLVMInt8Type();
-    // LLVMTypeRef int_8_type_ptr = LLVMPointerType(int_8_type, 0);
-    // LLVMTypeRef int_32_type = LLVMInt32Type();
-    // LLVMTypeRef double_type = LLVMDoubleType();
-
-    // // LLVMDumpModule(module); // dump module to STDOUT
-    // char *output = LLVMPrintModuleToString(module);
-    // fprintf(output_file, "%s", output);
-    // LLVMDisposeBuilder(builder);
-    // LLVMDisposeModule(module);
-    // LLVMContextDispose(LLVMGetGlobalContext());
-    // return 0;
 }
-
-// int hello_world()
-// {
-
-//     // create context, module and builder
-//     LLVMContextRef context = LLVMContextCreate();
-//     LLVMModuleRef module = LLVMModuleCreateWithNameInContext("hello", context);
-//     LLVMBuilderRef builder = LLVMCreateBuilderInContext(context);
-
-//     LLVMSetTarget(module, target);
-//     // types
-//     LLVMTypeRef int_8_type = LLVMInt8TypeInContext(context);
-//     LLVMTypeRef int_8_type_ptr = LLVMPointerType(int_8_type, 0);
-//     LLVMTypeRef int_8_type_ptr_ptr = LLVMPointerType(int_8_type_ptr, 0);
-//     LLVMTypeRef int_32_type = LLVMInt32TypeInContext(context);
-
-//     // puts function
-//     LLVMTypeRef puts_function_args_type[1] = {int_8_type_ptr};
-
-//     LLVMTypeRef puts_function_type = LLVMFunctionType(int_32_type, puts_function_args_type, 1, false);
-//     LLVMValueRef puts_function = LLVMAddFunction(module, "puts", puts_function_type);
-//     // end
-
-//     // main function
-//     LLVMTypeRef main_function_args_type[2] = {int_32_type, int_8_type_ptr_ptr};
-//     LLVMTypeRef main_function_type = LLVMFunctionType(int_32_type, main_function_args_type, 0, false);
-//     LLVMValueRef main_function = LLVMAddFunction(module, "main", main_function_type);
-
-//     LLVMBasicBlockRef entry = LLVMAppendBasicBlockInContext(context, main_function, "entry");
-//     LLVMPositionBuilderAtEnd(builder, entry);
-
-//     LLVMValueRef puts_function_args[] = {
-//         LLVMBuildPointerCast(builder,                                                  // cast [14 x i8] type to int8 pointer
-//                              LLVMBuildGlobalString(builder, "Hello, World!", "hello"), // build hello string constant
-//                              int_8_type_ptr, "0")};
-
-//     LLVMBuildCall(builder, puts_function, puts_function_args, 1, "i");
-//     LLVMBuildRet(builder, LLVMConstInt(int_32_type, 0, false));
-//     // end
-
-//     // LLVMDumpModule(module); // dump module to STDOUT
-//     char *hello = LLVMPrintModuleToString(module);
-//     FILE *file = fopen("hello.ll", "w");
-//     fprintf(file, "%s", hello);
-
-//     // clean memory
-//     LLVMDisposeBuilder(builder);
-//     LLVMDisposeModule(module);
-//     LLVMContextDispose(context);
-//     return 0;
-// }

@@ -37,15 +37,15 @@ public:
         bits = parse_pos_int(bits_str, bits_str_len, 10);
         byte_size = bits * 8;
     }
-    unsigned int get_byte_size()
+    virtual unsigned int get_byte_size()
     {
         return byte_size;
     }
-    unsigned int get_bit_size()
+    virtual unsigned int get_bit_size()
     {
         return bits;
     }
-    LLVMTypeRef llvm_type()
+    virtual LLVMTypeRef llvm_type()
     {
         switch (bits)
         {
@@ -73,20 +73,18 @@ public:
             if (is_floating)
                 return float_128_type;
             return int_128_type;
-        default:
-            fprintf(stderr, "TypeError: Unknown numerical type (%d bits, %d floating, %d signed)", bits, is_floating, is_signed);
-            exit(1);
-            break;
         }
+        fprintf(stderr, "TypeError: Unknown numerical type (%d bits, %d floating, %d signed)", bits, is_floating, is_signed);
+        exit(1);
     }
-    bool eq(Type *other)
+    virtual bool eq(Type *other)
     {
         if (NumType *other_n = dynamic_cast<NumType *>(other))
             return other_n->bits == bits && other_n->is_floating == is_floating && other_n->is_signed == is_signed;
         return false;
     }
 };
-class PointerType
+class PointerType : public Type
 {
 public:
     Type *points_to;
@@ -95,7 +93,21 @@ public:
     {
         return points_to;
     }
-    bool eq(Type *other)
+    virtual unsigned int get_byte_size()
+    {
+        error("todo: ptr size");
+        return 4;
+    }
+    virtual unsigned int get_bit_size()
+    {
+        error("todo: ptr size");
+        return 32;
+    }
+    virtual LLVMTypeRef llvm_type()
+    {
+        return LLVMPointerType(this->points_to->llvm_type(), 0);
+    }
+    virtual bool eq(Type *other)
     {
         if (PointerType *other_n = dynamic_cast<PointerType *>(other))
             return other_n->points_to->eq(this->points_to);
@@ -110,17 +122,17 @@ public:
     unsigned int arguments_len;
 
     FunctionType(Type *return_type, Type **arguments, unsigned int arguments_len) : return_type(return_type), arguments(arguments), arguments_len(arguments_len) {}
-    unsigned int get_byte_size()
+    virtual unsigned int get_byte_size()
     {
         error("functions don't have a byte size");
         return 0;
     }
-    unsigned int get_bit_size()
+    virtual unsigned int get_bit_size()
     {
         error("functions don't have a bit size");
         return 0;
     }
-    LLVMTypeRef llvm_type()
+    virtual LLVMTypeRef llvm_type()
     {
         error("functions don't have LLVM types");
         return nullptr;
