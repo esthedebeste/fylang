@@ -31,7 +31,7 @@ extern "C"
         return X;
     }
 
-    /// int_floor - takes a c-string and prints it to stderr (without newline)
+    /// eputs - takes a c-string and prints it to stderr (without newline)
     DLLEXPORT int eputs(char *str)
     {
         return fputs(str, stderr);

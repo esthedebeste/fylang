@@ -1,9 +1,7 @@
-extern "C"
-{
-#include "llvm-c/Core.h"
-#include "llvm-c/TargetMachine.h"
-#include "llvm-c/Transforms/PassBuilder.h"
-}
+#include "consts.cpp"
+#include "asts.cpp"
+#include "utils.cpp"
+#include "types.cpp"
 #include <stdbool.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -11,10 +9,8 @@ extern "C"
 #include <vector>
 #include <memory>
 #include <malloc.h>
-#include "asts.cpp"
-#include "utils.cpp"
-#include "types.cpp"
 
+// todo: setting variables and setting pointers
 FILE *current_file;
 static int next_char()
 {
@@ -34,19 +30,6 @@ static int next_char()
     return ret;
 }
 /// --- BEGIN LEXER --- ///
-const int T_EOF = -1;        // end of file
-const int T_IDENTIFIER = -2; // foo
-const int T_NUMBER = -3;     // 123
-const int T_STRING = -4;     // "foo"
-const int T_CHAR = -5;       // 'a'
-const int T_BOOL = -6;       // true
-const int T_IF = -7;         // if
-const int T_ELSE = -8;       // else
-const int T_WHILE = -9;      // while
-const int T_RETURN = -10;    // return
-const int T_FUNCTION = -11;  // fun
-const int T_EXTERN = -12;    // extern
-const int T_LET = -13;       // let
 static unsigned int identifier_string_length;
 static char *identifier_string;    // [a-zA-Z][a-zA-Z0-9]* - Filled in if T_IDENTIFIER
 static char char_value;            // '[^']' - Filled in if T_CHAR
@@ -106,7 +89,7 @@ static bool isnt_space(char c)
 }
 static bool is_alphaish(char c)
 {
-    return isalpha(c) || c == '_';
+    return isalpha(c) || isdigit(c) || c == '_';
 }
 static char get_escape(char escape_char)
 {
@@ -161,7 +144,7 @@ static int next_token()
         // Number: [0-9]*.?[0-9]*
         num_has_dot = false;
         read_str(&is_numish, &num_value, &num_length);
-        if (last_char == 'd' || last_char == 'f' || last_char == 'i' || last_char == 'u' || last_char == 'b')
+        if (last_char == 'd' || last_char == 'l' || last_char == 'f' || last_char == 'i' || last_char == 'u' || last_char == 'b')
         {
             num_type = last_char;
             last_char = next_char();
@@ -182,7 +165,7 @@ static int next_token()
         // String: "[^"]*"c?
         unsigned int curr_size = 512;
         char *str = (char *)malloc(curr_size);
-        static unsigned int str_len = 0;
+        unsigned int str_len = 0;
         while ((last_char = next_char()) != '"')
         {
             if (str_len > curr_size)
@@ -235,10 +218,14 @@ static int next_token()
         return T_CHAR;
     }
 
-    // Otherwise, just return the character as its ascii value.
-    // TODO: multi-char (bin)ops (==, >>, <<)
     int curr_char = last_char;
     last_char = next_char();
+    if (curr_char == '=' && last_char == '=') // ==
+    {
+        last_char = next_char();
+        return T_EQEQ;
+    }
+    // Otherwise, just return the character as its ascii value.
     return curr_char;
 }
 /// --- END LEXER --- ///
@@ -425,7 +412,9 @@ static std::unique_ptr<ExprAST> parse_block()
         else if (expr_i > MAX_EXPRS)
             error("too many exprs in block (>1024)");
         else
+        {
             exprs[expr_i] = std::move(parse_primary());
+        }
     exprs = (std::unique_ptr<ExprAST> *)reallocarray(exprs, expr_i, sizeof(std::unique_ptr<ExprAST>));
     eat('}');
     return std::make_unique<BlockExprAST>(exprs, expr_i);
@@ -438,14 +427,20 @@ static std::unique_ptr<ExprAST> parse_let_expr()
     unsigned int id_len = identifier_string_length;
     Type *type = nullptr;
     eat(T_IDENTIFIER, (char *)"variable name");
+    fprintf(stderr, "%d(%c)", curr_token);
     // explicit typing
     if (curr_token == ':')
     {
         eat(':');
         type = parse_type_unary();
     }
-    eat('=');
-    std::unique_ptr<ExprAST> value = parse_expr();
+    std::unique_ptr<ExprAST> value = nullptr;
+    // immediate assign
+    if (curr_token == '=')
+    {
+        eat('=');
+        value = parse_expr();
+    }
 
     return std::make_unique<LetExprAST>(id, id_len, type, std::move(value));
 }
@@ -684,9 +679,13 @@ int main(int argc, char **argv)
     }
 
     binop_precedence['<'] = 10;
+    binop_precedence['>'] = 10;
+    binop_precedence[T_EQEQ] = 10;
     binop_precedence['+'] = 20;
     binop_precedence['-'] = 20;
-    binop_precedence['*'] = 40; // highest
+    binop_precedence['*'] = 40;
+    binop_precedence['&'] = 60;
+    binop_precedence['|'] = 60; // highest
 
     // host machine triple
     char *target_triple = LLVMGetDefaultTargetTriple();
@@ -700,6 +699,7 @@ int main(int argc, char **argv)
     char *host_cpu_name = LLVMGetHostCPUName();
     char *host_cpu_features = LLVMGetHostCPUFeatures();
     LLVMTargetMachineRef target_machine = LLVMCreateTargetMachine(target, target_triple, host_cpu_name, host_cpu_features, LLVMCodeGenLevelAggressive, LLVMRelocStatic, LLVMCodeModelSmall);
+    target_data = LLVMCreateTargetDataLayout(target_machine);
     // create module
     curr_module = LLVMModuleCreateWithName(argv[1]);
     // set target to current machine

@@ -4,12 +4,9 @@
 #include <string>
 #include "utils.cpp"
 #include "types.cpp"
-static LLVMContextRef curr_ctx;
-static LLVMBuilderRef curr_builder;
-static LLVMModuleRef curr_module;
-static LLVMPassManagerRef curr_pass_manager;
 
 static std::map<std::string, LLVMValueRef> curr_named_values;
+static std::map<std::string, LLVMValueRef> curr_named_var_ptrs;
 static std::map<std::string, Type *> curr_named_var_types;
 static std::map<std::string, FunctionType *> curr_functions;
 
@@ -20,6 +17,12 @@ public:
     virtual ~ExprAST() {}
     virtual Type *get_type() = 0;
     virtual LLVMValueRef codegen() = 0;
+    virtual LLVMValueRef gen_ptr()
+    {
+        LLVMValueRef ptr = LLVMBuildAlloca(curr_builder, get_type()->llvm_type(), "alloctmp");
+        LLVMBuildStore(curr_builder, codegen(), ptr);
+        return ptr;
+    }
     void print_codegen_to(FILE *stream)
     {
         LLVMValueRef val = this->codegen();
@@ -111,9 +114,28 @@ public:
     }
     LLVMValueRef codegen()
     {
-        LLVMValueRef V = curr_named_values[name];
+        LLVMValueRef ptr = curr_named_var_ptrs[name];
+        if (!ptr)
+        {
+            LLVMValueRef V = curr_named_values[name];
+            if (!V)
+                error("non-existent variable");
+            return V;
+        }
+        return LLVMBuildLoad2(curr_builder, get_type()->llvm_type(), ptr, "tmpload");
+    }
+    LLVMValueRef gen_ptr()
+    {
+        LLVMValueRef V = curr_named_var_ptrs[name];
         if (!V)
-            error("non-existent variable");
+        {
+            LLVMValueRef value = curr_named_values[name];
+            if (!value)
+                error("non-existent variable");
+            LLVMValueRef ptr = LLVMBuildAlloca(curr_builder, get_type()->llvm_type(), "alloctmp");
+            LLVMBuildStore(curr_builder, codegen(), ptr);
+            return ptr;
+        }
         return V;
     }
 };
@@ -127,12 +149,15 @@ class LetExprAST : public ExprAST
     std::unique_ptr<ExprAST> value;
 
 public:
-    LetExprAST(char *id, unsigned int id_len, Type *type, std::unique_ptr<ExprAST> value) : id(id), id_len(id_len), type(type)
+    LetExprAST(char *id, unsigned int id_len, Type *type, std::unique_ptr<ExprAST> value) : id(id), id_len(id_len)
     {
         if (type)
             curr_named_var_types[std::string(id, id_len)] = type;
+        else if (value != nullptr)
+            curr_named_var_types[std::string(id, id_len)] = type = value->get_type();
         else
-            curr_named_var_types[std::string(id, id_len)] = value->get_type();
+            error("Untyped valueless variable");
+        this->type = type;
         this->value = std::move(value);
     }
     Type *get_type()
@@ -141,10 +166,27 @@ public:
     }
     LLVMValueRef codegen()
     {
-        LLVMValueRef llvm_val = value->codegen();
-        LLVMSetValueName2(llvm_val, id, id_len);
-        curr_named_values[std::string(id, id_len)] = llvm_val;
-        return llvm_val;
+        LLVMValueRef ptr = LLVMBuildAlloca(curr_builder, type->llvm_type(), id);
+        curr_named_var_ptrs[std::string(id, id_len)] = ptr;
+        if (value)
+        {
+            LLVMValueRef llvm_val = value->codegen();
+            LLVMBuildStore(curr_builder, llvm_val, ptr);
+            return llvm_val;
+        }
+        else
+            return LLVMConstNull(type->llvm_type());
+    }
+    LLVMValueRef gen_ptr()
+    {
+        LLVMValueRef ptr = LLVMBuildAlloca(curr_builder, type->llvm_type(), id);
+        if (value)
+        {
+            LLVMValueRef llvm_val = value->codegen();
+            LLVMBuildStore(curr_builder, llvm_val, ptr);
+        }
+        curr_named_var_ptrs[std::string(id, id_len)] = ptr;
+        return ptr;
     }
 };
 
@@ -211,6 +253,79 @@ public:
     }
 };
 
+LLVMValueRef gen_num_num_binop(char op, LLVMValueRef L, LLVMValueRef R, NumType *lhs_nt, NumType *rhs_nt)
+{
+    if (lhs_nt->is_floating && rhs_nt->is_floating)
+        switch (op)
+        {
+        case '+':
+            return LLVMBuildFAdd(curr_builder, L, R, "faddtmp");
+        case '-':
+            return LLVMBuildFSub(curr_builder, L, R, "fsubtmp");
+        case '*':
+            return LLVMBuildFMul(curr_builder, L, R, "fmultmp");
+        case '&':
+            return LLVMBuildAnd(curr_builder, L, R, "fandtmp");
+        case '|':
+            return LLVMBuildOr(curr_builder, L, R, "fbortmp");
+        case '<':
+            return LLVMBuildFCmp(curr_builder, LLVMRealPredicate::LLVMRealULT, L, R, "fcmptmp");
+        case '>':
+            return LLVMBuildFCmp(curr_builder, LLVMRealPredicate::LLVMRealUGT, L, R, "fcmptmp");
+        case T_EQEQ:
+            return LLVMBuildFCmp(curr_builder, LLVMRealPredicate::LLVMRealUEQ, L, R, "fcmptmp");
+        default:
+            fprintf(stderr, "Error: invalid float_float binary operator '%c'", op);
+            exit(1);
+        }
+    else if (!lhs_nt->is_floating && !rhs_nt->is_floating)
+    {
+
+        switch (op)
+        {
+        case '+':
+            return LLVMBuildAdd(curr_builder, L, R, "iaddtmp");
+        case '-':
+            return LLVMBuildSub(curr_builder, L, R, "isubtmp");
+        case '*':
+            return LLVMBuildMul(curr_builder, L, R, "imultmp");
+        case '&':
+            return LLVMBuildAnd(curr_builder, L, R, "iandtmp");
+        case '|':
+            return LLVMBuildOr(curr_builder, L, R, "ibortmp");
+        case '<':
+            return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntULT, L, R, "icmptmp");
+        case '>':
+            return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntUGT, L, R, "icmptmp");
+        case T_EQEQ:
+            return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntEQ, L, R, "icmptmp");
+        default:
+            fprintf(stderr, "Error: invalid int_int binary operator '%c'", op);
+            exit(1);
+        }
+    }
+    else
+    {
+        fprintf(stderr, "Error: invalid float_int binary operator '%c'", op);
+        exit(1);
+    }
+}
+LLVMValueRef gen_ptr_num_binop(char op, LLVMValueRef ptr, LLVMValueRef num, PointerType *ptr_t, NumType *num_t)
+{
+    switch (op)
+    {
+    case '-':
+        // num = 0-num
+        num = LLVMBuildSub(curr_builder, LLVMConstInt((new NumType(32, false, false))->llvm_type(), 0, false), num, "ptrmintmp");
+        /* falls through */
+    case '+':
+        return LLVMBuildGEP2(curr_builder, ptr_t->points_to->llvm_type(), ptr, &num, 1, "ptraddtmp");
+    default:
+        fprintf(stderr, "Error: invalid ptr_num binary operator '%c'", op);
+        exit(1);
+    }
+}
+
 /// BinaryExprAST - Expression class for a binary operator.
 class BinaryExprAST : public ExprAST
 {
@@ -226,61 +341,38 @@ public:
     {
         Type *lhs_t = LHS->get_type();
         Type *rhs_t = RHS->get_type();
-        if (lhs_t->llvm_type() != rhs_t->llvm_type())
-            error("binexpr left-hand and right-hand side don't have the same type");
-        return lhs_t;
+        TypeType lhs_tt = lhs_t->type_type();
+        TypeType rhs_tt = rhs_t->type_type();
+
+        if (lhs_tt == TypeType::Number && rhs_tt == TypeType::Number) // int + int returns int, int < int returns int1 (bool)
+            return (op == '<' || op == '>' || op == T_EQEQ) ? new NumType(1, false, false) : /* todo get max size and return that type */ lhs_t;
+        else if (lhs_tt == TypeType::Pointer && rhs_tt == TypeType::Number) // ptr + int returns offsetted ptr
+            return /* ptr */ lhs_t;
+        else if (lhs_tt == TypeType::Number && rhs_tt == TypeType::Pointer) // int + ptr returns offsetted ptr
+            return /* ptr */ rhs_t;
+        fprintf(stderr, "(%d,%d)\n", lhs_tt, rhs_tt);
+        error("Unknown ptr_ptr op");
+        return nullptr;
     }
     LLVMValueRef codegen()
     {
         LLVMValueRef L = LHS->codegen();
         LLVMValueRef R = RHS->codegen();
-        NumType *type = dynamic_cast<NumType *>(get_type());
-        if (!type)
-            error("pointer-ops aren't implemented yet");
+        Type *lhs_t = LHS->get_type();
+        Type *rhs_t = RHS->get_type();
 
-        if (!L || !R)
-            return nullptr;
-
-        if (type->is_floating)
-            switch (op)
-            {
-            case '+':
-                return LLVMBuildFAdd(curr_builder, L, R, "faddtmp");
-            case '-':
-                return LLVMBuildFSub(curr_builder, L, R, "fsubtmp");
-            case '*':
-                return LLVMBuildFMul(curr_builder, L, R, "fmultmp");
-            case '<':
-                L = LLVMBuildFCmp(curr_builder, LLVMRealPredicate::LLVMRealULT, L, R, "fcmptmp");
-                // Convert bool 0/1 to 0.0 or 1.0
-                return LLVMBuildUIToFP(curr_builder, L, type->llvm_type(), "booltmp");
-            default:
-                fprintf(stderr, "Error: invalid binary operator '%c'", op);
-                exit(1);
-            }
-        else
-        {
-
-            switch (op)
-            {
-            case '+':
-                return LLVMBuildAdd(curr_builder, L, R, "iaddtmp");
-            case '-':
-                return LLVMBuildSub(curr_builder, L, R, "isubtmp");
-            case '*':
-                return LLVMBuildMul(curr_builder, L, R, "imultmp");
-            case '<':
-                L = LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntULT, L, R, "fcmptmp");
-                if (type->bits == 1)
-                    return L;
-                else
-                    // Convert bool 0/1 to 0 or 1
-                    return LLVMBuildIntCast2(curr_builder, L, type->llvm_type(), type->is_signed, "booltmp");
-            default:
-                fprintf(stderr, "Error: invalid binary operator '%c'", op);
-                exit(1);
-            }
-        }
+        NumType *lhs_nt = dynamic_cast<NumType *>(lhs_t);
+        NumType *rhs_nt = dynamic_cast<NumType *>(rhs_t);
+        PointerType *lhs_pt = dynamic_cast<PointerType *>(lhs_t);
+        PointerType *rhs_pt = dynamic_cast<PointerType *>(rhs_t);
+        if (lhs_nt && rhs_nt)
+            return gen_num_num_binop(op, L, R, lhs_nt, rhs_nt);
+        else if (lhs_nt && rhs_pt)
+            return gen_ptr_num_binop(op, R, L, rhs_pt, lhs_nt);
+        else if (lhs_pt && rhs_nt)
+            return gen_ptr_num_binop(op, L, R, lhs_pt, rhs_nt);
+        error("Unknown ptr_ptr op");
+        return nullptr;
     }
 };
 /// UnaryExprAST - Expression class for a unary operator.
@@ -294,11 +386,22 @@ public:
         : op(op), operand(std::move(operand)) {}
     Type *get_type()
     {
-        // todo could be different when unary pointer operators are implemented later
-        return operand->get_type();
+        if (op == '*')
+            if (PointerType *opt = dynamic_cast<PointerType *>(operand->get_type()))
+                return opt->get_points_to();
+            else
+            {
+                error("* can't be used on a non-pointer type");
+                return nullptr;
+            }
+        else if (op == '&')
+            return new PointerType(operand->get_type());
+        else
+            return operand->get_type();
     }
     LLVMValueRef codegen()
     {
+        auto zero = LLVMConstInt((new NumType(32, false, false))->llvm_type(), 0, false);
         switch (op)
         {
         case '!':
@@ -307,6 +410,15 @@ public:
         case '-':
             // shortcut for 0-n
             return LLVMBuildFSub(curr_builder, LLVMConstReal(float_64_type, 0.0), operand->codegen(), "negtmp");
+        case '*':
+        {
+            PointerType *pt = dynamic_cast<PointerType *>(operand->get_type());
+            if (!pt)
+                error("* did not receive a pointer");
+            return LLVMBuildLoad2(curr_builder, pt->get_points_to()->llvm_type(), operand->codegen(), "loadtmp");
+        }
+        case '&':
+            return operand->gen_ptr();
         default:
             fprintf(stderr, "Error: invalid unary operator '%c'", op);
             exit(1);

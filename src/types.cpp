@@ -11,6 +11,12 @@ static LLVMTypeRef float_32_type = LLVMFloatType();  // AKA float
 static LLVMTypeRef float_64_type = LLVMDoubleType(); // AKA double
 static LLVMTypeRef float_128_type = LLVMFP128Type();
 
+enum TypeType
+{
+    Number = 0,
+    Pointer = 1,
+    Function = 2
+};
 /// Base type class.
 class Type
 {
@@ -19,6 +25,7 @@ public:
     virtual unsigned int get_byte_size() = 0;
     virtual unsigned int get_bit_size() = 0;
     virtual LLVMTypeRef llvm_type() = 0;
+    virtual TypeType type_type() = 0;
     virtual bool eq(Type *other) = 0;
 };
 class NumType : public Type
@@ -30,22 +37,22 @@ public:
     bool is_signed;
     NumType(unsigned int bits, bool is_floating, bool is_signed) : bits(bits), is_floating(is_floating), is_signed(is_signed)
     {
-        this->byte_size = bits * 8;
+        byte_size = bits * 8;
     }
     NumType(char *bits_str, unsigned int bits_str_len, bool is_floating, bool is_signed) : is_floating(is_floating), is_signed(is_signed)
     {
         bits = parse_pos_int(bits_str, bits_str_len, 10);
         byte_size = bits * 8;
     }
-    virtual unsigned int get_byte_size()
+    unsigned int get_byte_size()
     {
         return byte_size;
     }
-    virtual unsigned int get_bit_size()
+    unsigned int get_bit_size()
     {
         return bits;
     }
-    virtual LLVMTypeRef llvm_type()
+    LLVMTypeRef llvm_type()
     {
         switch (bits)
         {
@@ -77,7 +84,11 @@ public:
         fprintf(stderr, "TypeError: Unknown numerical type (%d bits, %d floating, %d signed)", bits, is_floating, is_signed);
         exit(1);
     }
-    virtual bool eq(Type *other)
+    TypeType type_type()
+    {
+        return TypeType::Number;
+    }
+    bool eq(Type *other)
     {
         if (NumType *other_n = dynamic_cast<NumType *>(other))
             return other_n->bits == bits && other_n->is_floating == is_floating && other_n->is_signed == is_signed;
@@ -93,21 +104,23 @@ public:
     {
         return points_to;
     }
-    virtual unsigned int get_byte_size()
+    unsigned int get_byte_size()
     {
-        error("todo: ptr size");
-        return 4;
+        return LLVMPointerSize(target_data);
     }
-    virtual unsigned int get_bit_size()
+    unsigned int get_bit_size()
     {
-        error("todo: ptr size");
-        return 32;
+        return LLVMPointerSize(target_data) * 8;
     }
-    virtual LLVMTypeRef llvm_type()
+    LLVMTypeRef llvm_type()
     {
         return LLVMPointerType(this->points_to->llvm_type(), 0);
     }
-    virtual bool eq(Type *other)
+    TypeType type_type()
+    {
+        return TypeType::Pointer;
+    }
+    bool eq(Type *other)
     {
         if (PointerType *other_n = dynamic_cast<PointerType *>(other))
             return other_n->points_to->eq(this->points_to);
@@ -122,22 +135,26 @@ public:
     unsigned int arguments_len;
 
     FunctionType(Type *return_type, Type **arguments, unsigned int arguments_len) : return_type(return_type), arguments(arguments), arguments_len(arguments_len) {}
-    virtual unsigned int get_byte_size()
+    unsigned int get_byte_size()
     {
         error("functions don't have a byte size");
         return 0;
     }
-    virtual unsigned int get_bit_size()
+    unsigned int get_bit_size()
     {
         error("functions don't have a bit size");
         return 0;
     }
-    virtual LLVMTypeRef llvm_type()
+    LLVMTypeRef llvm_type()
     {
         error("functions don't have LLVM types");
         return nullptr;
     }
-    virtual bool eq(Type *other)
+    TypeType type_type()
+    {
+        return TypeType::Function;
+    }
+    bool eq(Type *other)
     {
         // functions are unique
         return other == this;
