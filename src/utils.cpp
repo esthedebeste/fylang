@@ -24,3 +24,23 @@ void error(const char *str)
     fprintf(stderr, "Error: %s\n", str);
     exit(1);
 }
+// Shortcut for '(Elem*) calloc(amount, sizeof(Elem))'
+template <typename Elem>
+Elem *alloc_arr(unsigned int amount)
+{
+    return (Elem *)calloc(amount, sizeof(Elem));
+}
+// Shortcut for '(Elem*) reallocarray(ptr, amount, sizeof(Elem))'
+template <typename Elem>
+Elem *realloc_arr(Elem *ptr, unsigned int amount)
+{
+    return (Elem *)reallocarray(ptr, amount, sizeof(Elem));
+}
+char *alloc_c(unsigned int amount)
+{
+    return (char *)malloc(amount);
+}
+char *realloc_c(char *ptr, unsigned int amount)
+{
+    return (char *)realloc(ptr, amount);
+}

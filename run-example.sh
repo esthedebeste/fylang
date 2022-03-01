@@ -3,7 +3,8 @@ rm -rf bin/*
 cd ./bin
 name=$1
 shift
-clang++ -c ../src/fy-std.cpp -o ./fy-std.o
+clang++ -c ../src/fy-std.cpp -o ./fy-std.ll -S -emit-llvm
+clang++ -c ./fy-std.ll -o ./fy-std.o
 echo " - Compiled fy-std"
 clang++ ../src/main.cpp -o ./fylang  -lLLVM -lstdc++ -fuse-ld=lld &&
 echo "
@@ -12,7 +13,7 @@ echo "
 echo "
  - Compiled $name.fy" &&
 # Link and compile $1.ll with LLVM and c std
-clang ./$name.ll ./fy-std.o -o ./$name -lLLVM -lstdc++ -fuse-ld=lld &&
+clang ./$name.ll ./fy-std.o -o ./$name -lLLVM -lstdc++ -fuse-ld=lld -g &&
 echo "
  - Linked $name.ll,
  - Running $name" &&

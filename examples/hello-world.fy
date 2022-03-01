@@ -1,7 +1,8 @@
+# C functions/libraries can be used from fy
 extern puts(str: *char): int;
 fun main() {
-  # "str"c is a *char
-  puts("Hello World!"c)
+  # "str"c is a *char ending with a NUL-byte
+  puts("Hello World!")
   # return value of main is inferred based off of 0i (int32)
   0i
 }

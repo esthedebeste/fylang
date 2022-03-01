@@ -17,6 +17,18 @@ enum TypeType
     Pointer = 1,
     Function = 2
 };
+static const char *tt_to_str(TypeType tt)
+{
+    switch (tt)
+    {
+    case Number:
+        return "number";
+    case Pointer:
+        return "pointer";
+    case Function:
+        return "function";
+    }
+};
 /// Base type class.
 class Type
 {
@@ -27,7 +39,23 @@ public:
     virtual LLVMTypeRef llvm_type() = 0;
     virtual TypeType type_type() = 0;
     virtual bool eq(Type *other) = 0;
+    virtual bool neq(Type *other)
+    {
+        return !eq(other);
+    }
+    virtual void log_diff(Type *other)
+    {
+        log_type_diff(other);
+    }
+    bool log_type_diff(Type *other)
+    {
+        if (this->type_type() == other->type_type())
+            return false;
+        fprintf(stderr, "\n\t- type: A=%s, B=%s", tt_to_str(this->type_type()), tt_to_str(other->type_type()));
+        return true;
+    };
 };
+
 class NumType : public Type
 {
 public:
@@ -94,6 +122,24 @@ public:
             return other_n->bits == bits && other_n->is_floating == is_floating && other_n->is_signed == is_signed;
         return false;
     }
+    void log_diff(Type *other)
+    {
+        if (log_type_diff(other))
+            return;
+        NumType *b = dynamic_cast<NumType *>(other);
+        unsigned int a_bits = this->bits;
+        unsigned int b_bits = b->bits;
+        if (a_bits != b_bits)
+            fprintf(stderr, "\n\t- bits: A=%d, B=%d", a_bits, b_bits);
+        bool a_flt = this->is_floating;
+        bool b_flt = b->is_floating;
+        if (a_flt != b_flt)
+            fprintf(stderr, "\n\t- floating: A=%d, B=%d", a_flt, b_flt);
+        bool a_sgn = this->is_signed;
+        bool b_sgn = b->is_signed;
+        if (a_sgn != b_sgn)
+            fprintf(stderr, "\n\t- signed: A=%d, B=%d", a_sgn, b_sgn);
+    }
 };
 class PointerType : public Type
 {
@@ -126,6 +172,13 @@ public:
             return other_n->points_to->eq(this->points_to);
         return false;
     }
+    void log_diff(Type *other)
+    {
+        if (log_type_diff(other))
+            return;
+        PointerType *b = dynamic_cast<PointerType *>(other);
+        return this->get_points_to()->log_diff(b->get_points_to());
+    }
 };
 class FunctionType : public Type
 {
@@ -147,8 +200,11 @@ public:
     }
     LLVMTypeRef llvm_type()
     {
-        error("functions don't have LLVM types");
-        return nullptr;
+        LLVMTypeRef *llvm_args = alloc_arr<LLVMTypeRef>(arguments_len);
+        for (unsigned int i = 0; i < arguments_len; i++)
+            llvm_args[i] = arguments[i]->llvm_type();
+        // todo: vararg functions?
+        return LLVMFunctionType(return_type->llvm_type(), llvm_args, arguments_len, false);
     }
     TypeType type_type()
     {
@@ -156,7 +212,16 @@ public:
     }
     bool eq(Type *other)
     {
-        // functions are unique
-        return other == this;
+        FunctionType *other_f = dynamic_cast<FunctionType *>(other);
+        if (!other_f)
+            return false;
+        if (other_f->arguments_len != arguments_len)
+            return false;
+        if (other_f->return_type->neq(return_type))
+            return false;
+        for (unsigned int i = 0; i < arguments_len; i++)
+            if (other_f->arguments[i]->neq(arguments[i]))
+                return false;
+        return true;
     };
 };

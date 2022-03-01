@@ -31,6 +31,18 @@ extern "C"
         return X;
     }
 
+    /// eputn - takes a i32 and prints it to stderr
+    DLLEXPORT int eputn(int i)
+    {
+        return fprintf(stderr, "%d", i);
+    }
+
+    /// eputc - takes a char and prints it to stderr
+    DLLEXPORT int eputc(char ch)
+    {
+        return fputc(ch, stderr);
+    }
+
     /// eputs - takes a c-string and prints it to stderr (without newline)
     DLLEXPORT int eputs(char *str)
     {
