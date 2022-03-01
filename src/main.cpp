@@ -136,6 +136,8 @@ static int next_token()
             return T_ELSE;
         else if (streq(identifier_string, identifier_string_length, "let", 3))
             return T_LET;
+        else if (streq(identifier_string, identifier_string_length, "const", 5))
+            return T_CONST;
         else if (streq(identifier_string, identifier_string_length, "while", 5))
             return T_WHILE;
         return T_IDENTIFIER;
@@ -317,6 +319,8 @@ static Type *parse_type()
             return new NumType(64, false, is_signed);
         else if (streq(id, id_len, "bool", 4))
             return new NumType(1, false, false);
+        else if (streq(id, id_len, "void", 4))
+            return new VoidType();
     }
 }
 
@@ -436,9 +440,16 @@ static ExprAST *parse_block()
     return new BlockExprAST(exprs, expr_i);
 }
 
-static ExprAST *parse_let_expr()
+static LetExprAST *parse_let_expr()
 {
-    eat(T_LET, (char *)"let");
+    bool constant = false;
+    if (curr_token == T_CONST)
+    {
+        constant = true;
+        get_next_token();
+    }
+    else
+        eat(T_LET, (char *)"let");
     char *id = identifier_string;
     unsigned int id_len = identifier_string_length;
     Type *type = nullptr;
@@ -457,7 +468,7 @@ static ExprAST *parse_let_expr()
         value = parse_expr();
     }
 
-    return new LetExprAST(id, id_len, type, value);
+    return new LetExprAST(id, id_len, type, value, constant);
 }
 
 /// primary
@@ -486,6 +497,7 @@ static ExprAST *parse_primary()
     case T_WHILE:
         return parse_while_expr();
     case T_LET:
+    case T_CONST:
         return parse_let_expr();
     case '{':
         return parse_block();
@@ -619,11 +631,26 @@ static FunctionAST *parse_definition()
     auto e = parse_expr();
     return new FunctionAST(proto, e);
 }
-/// external ::= 'extern' prototype
-static PrototypeAST *parse_extern()
+/// external
+///   ::= 'fun' prototype
+///   ::= 'let' identifier ':' type
+static ExternExprAST *parse_extern()
 {
     eat(T_EXTERN, (char *)"extern"); // eat extern.
-    return parse_prototype(new NumType(64, false, false));
+    if (curr_token == T_FUNCTION)
+    {
+        get_next_token();
+        PrototypeAST *proto = parse_prototype(new NumType(32, false, true));
+        return new ExternExprAST(proto);
+    }
+    else if (curr_token == T_CONST)
+    {
+        LetExprAST *let = parse_let_expr();
+        return new ExternExprAST(let);
+    }
+    else
+        eat(0, (char *)"fun' or 'const");
+    return nullptr;
 }
 // /// toplevelexpr ::= expression
 // static FunctionAST* parse_top_level_expr()
@@ -731,6 +758,11 @@ int main(int argc, char **argv)
 
     // open .fy file
     current_file = fopen(argv[1], "r");
+    if (!current_file)
+    {
+        fprintf(stderr, "File \'%s\' doesn't exist", argv[1]);
+        return 1;
+    }
     // parse and compile everything into LLVM IR
     main_loop();
     // export LLVM IR into other file

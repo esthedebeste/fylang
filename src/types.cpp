@@ -1,10 +1,12 @@
 #include "utils.cpp"
 #pragma once
+
+static LLVMTypeRef void_type = LLVMStructCreateNamed(LLVMGetGlobalContext(), "void");
 static LLVMTypeRef int_1_type = LLVMInt1Type(); // AKA bool
 static LLVMTypeRef int_8_type = LLVMInt8Type(); // AKA byte, char
 static LLVMTypeRef int_16_type = LLVMInt16Type();
 static LLVMTypeRef int_32_type = LLVMInt32Type();    // AKA int
-static LLVMTypeRef int_64_type = LLVMInt32Type();    // AKA long
+static LLVMTypeRef int_64_type = LLVMInt64Type();    // AKA long
 static LLVMTypeRef int_128_type = LLVMInt128Type();  // AKA long long
 static LLVMTypeRef float_16_type = LLVMHalfType();   // AKA half
 static LLVMTypeRef float_32_type = LLVMFloatType();  // AKA float
@@ -13,14 +15,17 @@ static LLVMTypeRef float_128_type = LLVMFP128Type();
 
 enum TypeType
 {
-    Number = 0,
-    Pointer = 1,
-    Function = 2
+    Void = 0,
+    Number = 1,
+    Pointer = 2,
+    Function = 3
 };
 static const char *tt_to_str(TypeType tt)
 {
     switch (tt)
     {
+    case Void:
+        return "void";
     case Number:
         return "number";
     case Pointer:
@@ -38,7 +43,10 @@ public:
     virtual unsigned int get_bit_size() = 0;
     virtual LLVMTypeRef llvm_type() = 0;
     virtual TypeType type_type() = 0;
-    virtual bool eq(Type *other) = 0;
+    virtual bool eq(Type *other)
+    {
+        return this->type_type() == other->type_type();
+    };
     virtual bool neq(Type *other)
     {
         return !eq(other);
@@ -54,6 +62,16 @@ public:
         fprintf(stderr, "\n\t- type: A=%s, B=%s", tt_to_str(this->type_type()), tt_to_str(other->type_type()));
         return true;
     };
+};
+
+class VoidType : public Type
+{
+public:
+    VoidType() {}
+    unsigned int get_byte_size() { return 0; }
+    unsigned int get_bit_size() { return 0; }
+    LLVMTypeRef llvm_type() { return void_type; }
+    TypeType type_type() { return TypeType::Void; }
 };
 
 class NumType : public Type
@@ -145,7 +163,9 @@ class PointerType : public Type
 {
 public:
     Type *points_to;
-    PointerType(Type *points_to) : points_to(points_to) {}
+    PointerType(Type *points_to) : points_to(points_to)
+    {
+    }
     Type *get_points_to()
     {
         return points_to;

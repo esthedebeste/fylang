@@ -19,7 +19,8 @@ const int T_RETURN = -10;    // return
 const int T_FUNCTION = -11;  // fun
 const int T_EXTERN = -12;    // extern
 const int T_LET = -13;       // let
-const int T_EQEQ = -14;      // ==
+const int T_CONST = -14;     // const
+const int T_EQEQ = -15;      // ==
 
 static LLVMContextRef curr_ctx;
 static LLVMBuilderRef curr_builder;

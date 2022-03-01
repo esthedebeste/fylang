@@ -1,11 +1,11 @@
-extern putchar(ch: char): int
-extern eputs(str: *char): int
-extern strlen(str: *char): int
+extern fun putchar(ch: char): int
+extern fun eputs(str: *char): int
+extern fun strlen(str: *char): int
 fun main() {
   # "str" is a *char ending with a NUL-byte
-  let str = "Hello World!"
+  const str: *char = "Hello World!"
+  const len = strlen(str)
   let i: int = 0
-  let len = strlen(str)
   # Iterate over all the characters in `str`, printing each individually. 
   while (i < len) {
     putchar(*(str + i))

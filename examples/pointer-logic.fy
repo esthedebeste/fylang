@@ -1,4 +1,4 @@
-extern eputs(str: *char): int
+extern fun eputs(str: *char): int
 fun main() {
     let str = "hello world!"
     # Instead of ptr[offset], ptr+offset is used.

@@ -150,13 +150,14 @@ public:
 /// LetExprAST - Expression class for creating a variable, like "let a = 3".
 class LetExprAST : public ExprAST
 {
+
+public:
     char *id;
     unsigned int id_len;
     Type *type;
     ExprAST *value;
-
-public:
-    LetExprAST(char *id, unsigned int id_len, Type *type, ExprAST *value) : id(id), id_len(id_len)
+    bool constant;
+    LetExprAST(char *id, unsigned int id_len, Type *type, ExprAST *value, bool constant) : id(id), id_len(id_len), constant(constant)
     {
         if (type)
             curr_named_var_types[std::string(id, id_len)] = type;
@@ -173,6 +174,13 @@ public:
     }
     LLVMValueRef gen_val()
     {
+        if (constant)
+        {
+            if (value)
+                return curr_named_consts[std::string(id, id_len)] = value->gen_val();
+            else
+                error("Constant variables need an initialization value");
+        }
         LLVMValueRef ptr = LLVMBuildAlloca(curr_builder, type->llvm_type(), id);
         curr_named_var_ptrs[std::string(id, id_len)] = ptr;
         if (value)
@@ -186,14 +194,22 @@ public:
     }
     LLVMValueRef gen_ptr()
     {
+        if (constant)
+            error("Can't point to a constant");
         LLVMValueRef ptr = LLVMBuildAlloca(curr_builder, type->llvm_type(), id);
+        curr_named_var_ptrs[std::string(id, id_len)] = ptr;
         if (value)
         {
             LLVMValueRef llvm_val = value->gen_val();
             LLVMBuildStore(curr_builder, llvm_val, ptr);
         }
-        curr_named_var_ptrs[std::string(id, id_len)] = ptr;
         return ptr;
+    }
+    LLVMValueRef gen_declare()
+    {
+        LLVMValueRef global = LLVMAddGlobal(curr_module, type->llvm_type(), id);
+        curr_named_var_ptrs[std::string(id, id_len)] = global;
+        return global;
     }
 };
 
@@ -556,132 +572,6 @@ public:
     }
 };
 
-/// PrototypeAST - This class represents the "prototype" for a function,
-/// which captures its name, and its argument names (thus implicitly the number
-/// of arguments the function takes).
-class PrototypeAST
-{
-
-public:
-    char **arg_names;
-    unsigned int *arg_name_lengths;
-    Type **arg_types;
-    Type *return_type;
-    FunctionType *type;
-    unsigned int arg_count;
-    char *name;
-    unsigned int name_len;
-    PrototypeAST(char *name, unsigned int name_len,
-                 char **arg_names, unsigned int *arg_name_lengths,
-                 Type **arg_types,
-                 unsigned int args_len,
-                 Type *return_type)
-        : name(name), name_len(name_len), arg_names(arg_names), arg_name_lengths(arg_name_lengths), arg_types(arg_types), arg_count(args_len), return_type(return_type)
-    {
-        for (unsigned i = 0; i != arg_count; ++i)
-            curr_named_var_types[std::string(arg_names[i], arg_name_lengths[i])] = arg_types[i];
-        type = curr_named_functions[std::string(name)] = new FunctionType(return_type, arg_types, args_len);
-    }
-    FunctionType *get_type()
-    {
-        return type;
-    }
-    LLVMValueRef codegen()
-    {
-        // Make the function type:  double(double,double) etc.
-        LLVMTypeRef *llvm_arg_types = alloc_arr<LLVMTypeRef>(arg_count);
-        for (unsigned i = 0; i != arg_count; ++i)
-        {
-            llvm_arg_types[i] = arg_types[i]->llvm_type();
-        }
-        LLVMTypeRef function_type =
-            LLVMFunctionType(return_type->llvm_type(), llvm_arg_types, arg_count, false);
-
-        LLVMValueRef func =
-            LLVMAddFunction(curr_module, name, function_type);
-        // Set names for all arguments.
-        LLVMValueRef *params = alloc_arr<LLVMValueRef>(arg_count);
-        LLVMGetParams(func, params);
-        for (unsigned i = 0; i != arg_count; ++i)
-            LLVMSetValueName2(params[i], arg_names[i], arg_name_lengths[i]);
-
-        LLVMSetValueName2(func, name, name_len);
-        return func;
-    }
-    void print_codegen_to(FILE *stream)
-    {
-        LLVMValueRef val = this->codegen();
-        char *str = LLVMPrintValueToString(val);
-        fprintf(stream, "%s\n", str);
-        LLVMDisposeMessage(str);
-    }
-};
-
-/// FunctionAST - This class represents a function definition itself.
-class FunctionAST
-{
-    PrototypeAST *proto;
-    ExprAST *body;
-
-public:
-    FunctionAST(PrototypeAST *proto,
-                ExprAST *body)
-    {
-        if (proto->return_type == nullptr)
-            proto->return_type = body->get_type();
-        this->proto = proto;
-        this->body = body;
-    }
-
-    LLVMValueRef codegen()
-    {
-        // First, check for an existing function from a previous 'extern' declaration.
-        LLVMValueRef func = LLVMGetNamedFunction(curr_module, proto->name);
-
-        if (!func)
-            func = proto->codegen();
-
-        if (!func)
-            return nullptr;
-
-        if (LLVMCountBasicBlocks(func) != 0)
-            error("Function cannot be redefined.");
-
-        auto block = LLVMAppendBasicBlockInContext(curr_ctx, func, "");
-        LLVMPositionBuilderAtEnd(curr_builder, block);
-
-        unsigned int args_len = LLVMCountParams(func);
-        LLVMValueRef *params = alloc_arr<LLVMValueRef>(args_len);
-        LLVMGetParams(func, params);
-        size_t unused = 0;
-        for (unsigned i = 0; i != args_len; ++i)
-            curr_named_consts[LLVMGetValueName2(params[i], &unused)] = params[i];
-        if (LLVMValueRef ret_val = body->gen_val())
-        {
-            // Finish off the function.
-            LLVMBuildRet(curr_builder, ret_val);
-
-            // doesnt exist in c api (i think)
-            // // Validate the generated code, checking for consistency.
-            // // verifyFunction(*TheFunction);
-
-            curr_named_consts.clear();
-            return func;
-        }
-        curr_named_consts.clear();
-        // Error reading body, remove function.
-        LLVMDeleteFunction(func);
-        return nullptr;
-    }
-    void print_codegen_to(FILE *stream)
-    {
-        LLVMValueRef val = this->codegen();
-        char *str = LLVMPrintValueToString(val);
-        fprintf(stream, "%s\n", str);
-        LLVMDisposeMessage(str);
-    }
-};
-
 /// IfExprAST - Expression class for if/then/else.
 class IfExprAST : public ExprAST
 {
@@ -807,5 +697,170 @@ public:
         LLVMAddIncoming(phi, &then_v, &then_bb, 1);
         LLVMAddIncoming(phi, &else_v, &else_bb, 1);
         return phi;
+    }
+};
+/// PrototypeAST - This class represents the "prototype" for a function,
+/// which captures its name, and its argument names (thus implicitly the number
+/// of arguments the function takes).
+class PrototypeAST
+{
+public:
+    char **arg_names;
+    unsigned int *arg_name_lengths;
+    Type **arg_types;
+    Type *return_type;
+    FunctionType *type;
+    unsigned int arg_count;
+    char *name;
+    unsigned int name_len;
+    PrototypeAST(char *name, unsigned int name_len,
+                 char **arg_names, unsigned int *arg_name_lengths,
+                 Type **arg_types,
+                 unsigned int arg_count,
+                 Type *return_type)
+        : name(name), name_len(name_len), arg_names(arg_names), arg_name_lengths(arg_name_lengths), arg_types(arg_types), arg_count(arg_count), return_type(return_type)
+    {
+        for (unsigned i = 0; i != arg_count; ++i)
+            curr_named_var_types[std::string(arg_names[i], arg_name_lengths[i])] = arg_types[i];
+        type = curr_named_functions[std::string(name, name_len)] = new FunctionType(return_type, arg_types, arg_count);
+    }
+    FunctionType *get_type()
+    {
+        return type;
+    }
+    LLVMValueRef codegen()
+    {
+        // Make the function type:  double(double,double) etc.
+        LLVMTypeRef *llvm_arg_types = alloc_arr<LLVMTypeRef>(arg_count);
+        for (unsigned i = 0; i != arg_count; ++i)
+        {
+            llvm_arg_types[i] = arg_types[i]->llvm_type();
+        }
+        LLVMTypeRef function_type =
+            LLVMFunctionType(return_type->llvm_type(), llvm_arg_types, arg_count, false);
+
+        LLVMValueRef func =
+            LLVMAddFunction(curr_module, name, function_type);
+        // Set names for all arguments.
+        LLVMValueRef *params = alloc_arr<LLVMValueRef>(arg_count);
+        LLVMGetParams(func, params);
+        for (unsigned i = 0; i != arg_count; ++i)
+            LLVMSetValueName2(params[i], arg_names[i], arg_name_lengths[i]);
+
+        LLVMSetValueName2(func, name, name_len);
+        return func;
+    }
+    void print_codegen_to(FILE *stream)
+    {
+        LLVMValueRef val = this->codegen();
+        char *str = LLVMPrintValueToString(val);
+        fprintf(stream, "%s\n", str);
+        LLVMDisposeMessage(str);
+    }
+};
+/// ExternExprAST - Expression class for defining an extern.
+class ExternExprAST
+{
+    LetExprAST *let = nullptr;
+    PrototypeAST *prot = nullptr;
+    Type *type;
+
+public:
+    ExternExprAST(LetExprAST *let) : let(let)
+    {
+        type = let->get_type();
+        register_extern();
+    }
+    ExternExprAST(PrototypeAST *prot) : prot(prot)
+    {
+        type = prot->get_type();
+        register_extern();
+    }
+    void register_extern()
+    {
+        if (FunctionType *fun_t = dynamic_cast<FunctionType *>(type))
+            curr_named_functions[std::string(prot->name, prot->name_len)] = fun_t;
+        else
+            curr_named_var_types[std::string(let->id, let->id_len)] = type;
+    }
+    LLVMValueRef codegen()
+    {
+        register_extern();
+        if (let)
+            return let->gen_declare();
+        else
+            return prot->codegen();
+    }
+    void print_codegen_to(FILE *stream)
+    {
+        LLVMValueRef val = this->codegen();
+        char *str = LLVMPrintValueToString(val);
+        fprintf(stream, "%s\n", str);
+        LLVMDisposeMessage(str);
+    }
+};
+
+/// FunctionAST - This class represents a function definition itself.
+class FunctionAST
+{
+    PrototypeAST *proto;
+    ExprAST *body;
+
+public:
+    FunctionAST(PrototypeAST *proto,
+                ExprAST *body)
+    {
+        if (proto->return_type == nullptr)
+            proto->return_type = body->get_type();
+        this->proto = proto;
+        this->body = body;
+    }
+
+    LLVMValueRef codegen()
+    {
+        // First, check for an existing function from a previous 'extern' declaration.
+        LLVMValueRef func = LLVMGetNamedFunction(curr_module, proto->name);
+
+        if (!func)
+            func = proto->codegen();
+
+        if (!func)
+            return nullptr;
+
+        if (LLVMCountBasicBlocks(func) != 0)
+            error("Function cannot be redefined.");
+
+        auto block = LLVMAppendBasicBlockInContext(curr_ctx, func, "");
+        LLVMPositionBuilderAtEnd(curr_builder, block);
+
+        unsigned int args_len = LLVMCountParams(func);
+        LLVMValueRef *params = alloc_arr<LLVMValueRef>(args_len);
+        LLVMGetParams(func, params);
+        size_t unused = 0;
+        for (unsigned i = 0; i != args_len; ++i)
+            curr_named_consts[LLVMGetValueName2(params[i], &unused)] = params[i];
+        if (LLVMValueRef ret_val = body->gen_val())
+        {
+            // Finish off the function.
+            LLVMBuildRet(curr_builder, ret_val);
+
+            // doesnt exist in c api (i think)
+            // // Validate the generated code, checking for consistency.
+            // // verifyFunction(*TheFunction);
+
+            curr_named_consts.clear();
+            return func;
+        }
+        curr_named_consts.clear();
+        // Error reading body, remove function.
+        LLVMDeleteFunction(func);
+        return nullptr;
+    }
+    void print_codegen_to(FILE *stream)
+    {
+        LLVMValueRef val = this->codegen();
+        char *str = LLVMPrintValueToString(val);
+        fprintf(stream, "%s\n", str);
+        LLVMDisposeMessage(str);
     }
 };
