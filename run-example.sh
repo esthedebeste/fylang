@@ -20,5 +20,5 @@ echo "
  - Running $name" &&
 ./$name "$@" 
 echo "
- - Executed hello with exit code $?"
+ - Executed examples/$name.fy with exit code $?"
 cd ..

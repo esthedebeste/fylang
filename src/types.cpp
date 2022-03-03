@@ -19,7 +19,8 @@ enum TypeType
     Number = 1,
     Pointer = 2,
     Function = 3,
-    Array = 4
+    Array = 4,
+    Struct = 5
 };
 static const char *tt_to_str(TypeType tt)
 {
@@ -35,6 +36,8 @@ static const char *tt_to_str(TypeType tt)
         return "function";
     case Array:
         return "array";
+    case Struct:
+        return "struct";
     }
 };
 /// Base type class.
@@ -42,8 +45,6 @@ class Type
 {
 public:
     virtual ~Type() {}
-    virtual unsigned int get_byte_size() = 0;
-    virtual unsigned int get_bit_size() = 0;
     virtual LLVMTypeRef llvm_type() = 0;
     virtual TypeType type_type() = 0;
     virtual bool eq(Type *other)
@@ -71,8 +72,6 @@ class VoidType : public Type
 {
 public:
     VoidType() {}
-    unsigned int get_byte_size() { return 0; }
-    unsigned int get_bit_size() { return 0; }
     LLVMTypeRef llvm_type() { return void_type; }
     TypeType type_type() { return TypeType::Void; }
 };
@@ -92,14 +91,6 @@ public:
     {
         bits = parse_pos_int(bits_str, bits_str_len, 10);
         byte_size = bits * 8;
-    }
-    unsigned int get_byte_size()
-    {
-        return byte_size;
-    }
-    unsigned int get_bit_size()
-    {
-        return bits;
     }
     LLVMTypeRef llvm_type()
     {
@@ -173,14 +164,6 @@ public:
     {
         return points_to;
     }
-    unsigned int get_byte_size()
-    {
-        return LLVMPointerSize(target_data);
-    }
-    unsigned int get_bit_size()
-    {
-        return LLVMPointerSize(target_data) * 8;
-    }
     LLVMTypeRef llvm_type()
     {
         return LLVMPointerType(this->points_to->llvm_type(), 0);
@@ -219,14 +202,6 @@ public:
     {
         return count;
     }
-    unsigned int get_byte_size()
-    {
-        return elem->get_byte_size() * count;
-    }
-    unsigned int get_bit_size()
-    {
-        return elem->get_bit_size() * count;
-    }
     LLVMTypeRef llvm_type()
     {
         return LLVMArrayType(elem->llvm_type(), count);
@@ -253,6 +228,63 @@ public:
         b->elem->log_diff(this->elem);
     }
 };
+class StructType : public Type
+{
+    LLVMTypeRef llvm_struct_type;
+
+public:
+    Type **types;
+    char **names;
+    unsigned int *name_lengths;
+    unsigned int count;
+    StructType(char *name, unsigned int name_len, char **names, unsigned int *name_lengths, Type **types, unsigned int count) : names(names), name_lengths(name_lengths), types(types), count(count)
+    {
+        LLVMTypeRef *llvm_types = alloc_arr<LLVMTypeRef>(count);
+        for (unsigned int i = 0; i < count; i++)
+            llvm_types[i] = types[i]->llvm_type();
+        llvm_struct_type = LLVMStructCreateNamed(curr_ctx, name);
+        LLVMStructSetBody(llvm_struct_type, llvm_types, count, true);
+    }
+    Type *get_elem_type(unsigned int index)
+    {
+        if (index >= count)
+            error("Struct get_elem_type index out of bounds");
+        return types[index];
+    }
+    unsigned int get_index(char *name, unsigned int name_len)
+    {
+        for (unsigned int i = 0; i < count; i++)
+        {
+            if (name_lengths[i] == name_len)
+            {
+                for (unsigned int j = 0; j < name_len; j++)
+                    if (names[i][j] != name[j])
+                        continue;
+                return i;
+            }
+        }
+        error("Struct does not have key");
+        return -1;
+    }
+    LLVMTypeRef llvm_type()
+    {
+        return llvm_struct_type;
+    }
+    TypeType type_type()
+    {
+        return TypeType::Struct;
+    }
+    bool eq(Type *other)
+    {
+        // structs are unique
+        return this == other;
+    }
+    void log_diff(Type *other)
+    {
+        if (this != other)
+            fprintf(stderr, "Structs are unique.");
+    }
+};
 class FunctionType : public Type
 {
 public:
@@ -261,16 +293,6 @@ public:
     unsigned int arguments_len;
 
     FunctionType(Type *return_type, Type **arguments, unsigned int arguments_len) : return_type(return_type), arguments(arguments), arguments_len(arguments_len) {}
-    unsigned int get_byte_size()
-    {
-        error("functions don't have a byte size");
-        return 0;
-    }
-    unsigned int get_bit_size()
-    {
-        error("functions don't have a bit size");
-        return 0;
-    }
     LLVMTypeRef llvm_type()
     {
         LLVMTypeRef *llvm_args = alloc_arr<LLVMTypeRef>(arguments_len);

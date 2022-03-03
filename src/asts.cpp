@@ -1,3 +1,4 @@
+#pragma once
 #include <vector>
 #include <memory>
 #include <map>
@@ -9,8 +10,14 @@
 // Includes function arguments
 static std::map<std::string, Variable *> curr_named_variables;
 static std::map<std::string, Type *> curr_named_var_types;
+static std::map<std::string, Type *> curr_named_types;
 static std::map<std::string, FunctionType *> curr_named_functions;
 
+class TopLevelAST
+{
+public:
+    virtual void gen_toplevel() = 0;
+};
 /// ExprAST - Base class for all expression nodes.
 class ExprAST
 {
@@ -25,13 +32,6 @@ public:
         LLVMValueRef ptr = LLVMBuildAlloca(curr_builder, get_type()->llvm_type(), "alloctmp");
         LLVMBuildStore(curr_builder, gen_val(), ptr);
         return ptr;
-    }
-    void print_codegen_to(FILE *stream)
-    {
-        LLVMValueRef val = gen_val();
-        char *str = LLVMPrintValueToString(val);
-        fprintf(stream, "%s\n", str);
-        LLVMDisposeMessage(str);
     }
 };
 
@@ -151,7 +151,7 @@ public:
 };
 
 /// LetExprAST - Expression class for creating a variable, like "let a = 3".
-class LetExprAST : public ExprAST
+class LetExprAST : public ExprAST, public TopLevelAST
 {
 
 public:
@@ -176,20 +176,19 @@ public:
     {
         return type;
     }
+    void gen_toplevel()
+    {
+        Variable *var;
+        if (!value)
+            var = new BasicLoadVariable(LLVMAddGlobal(curr_module, type->llvm_type(), id), type);
+        else if (ConstantExpr *expr = dynamic_cast<ConstantExpr *>(value))
+            var = expr->gen_variable(id, constant);
+        else
+            error("Global variable needs a constant value inside it");
+        curr_named_variables[std::string(id, id_len)] = var;
+    }
     LLVMValueRef gen_val()
     {
-        if (global)
-        {
-            Variable *var;
-            if (!value)
-                var = new BasicLoadVariable(LLVMAddGlobal(curr_module, type->llvm_type(), id), type);
-            else if (ConstantExpr *expr = dynamic_cast<ConstantExpr *>(value))
-                var = expr->gen_variable(id, constant);
-            else
-                error("Global variable needs a constant value inside it");
-            curr_named_variables[std::string(id, id_len)] = var;
-            return nullptr;
-        }
         if (constant)
         {
             if (value)
@@ -553,7 +552,85 @@ public:
         {
             args_v[i] = args[i]->gen_val();
         }
-        return LLVMBuildCall2(curr_builder, curr_named_functions[std::string(callee, callee_len)]->llvm_type(), callee_f, args_v, args_v_len, "calltmp");
+        FunctionType *ft = curr_named_functions[std::string(callee, callee_len)];
+        return LLVMBuildCall2(curr_builder, ft->llvm_type(), callee_f, args_v, args_v_len, ft->return_type->type_type() == TypeType::Void ? "" : "calltmp");
+    }
+};
+
+/// PropAccessExprAST - Expression class for accessing properties (a.size).
+class PropAccessExprAST : public ExprAST
+{
+    ExprAST *source;
+    StructType *source_type;
+    unsigned int index;
+    Type *type;
+
+public:
+    PropAccessExprAST(char *key, unsigned int key_len, ExprAST *source)
+        : source(source)
+    {
+        source_type = dynamic_cast<StructType *>(dynamic_cast<PointerType *>(source->get_type())->get_points_to());
+        index = source_type->get_index(key, key_len);
+        type = source_type->get_elem_type(index);
+    }
+
+    Type *get_type()
+    {
+        return type;
+    }
+
+    LLVMValueRef gen_val()
+    {
+        return LLVMBuildLoad2(curr_builder, type->llvm_type(), gen_ptr(), "tmpload");
+    }
+    LLVMValueRef gen_ptr()
+    {
+        LLVMValueRef llvm_indexes[2] = {LLVMConstInt(LLVMInt32Type(), 0, false), LLVMConstInt(LLVMInt32Type(), index, false)};
+        return LLVMBuildGEP2(curr_builder, source_type->llvm_type(), source->gen_val(), llvm_indexes, 2, "tmpgep");
+    }
+};
+
+/// NewExprAST - Expression class for creating an instance of a struct (new String { pointer = "hi", length = 2 } ).
+class NewExprAST : public ExprAST
+{
+    StructType *type;
+    unsigned int *indexes;
+    ExprAST **values;
+    unsigned int key_count;
+
+public:
+    NewExprAST(char *name, unsigned int name_len, char **keys, unsigned int *key_lens, ExprAST **values, unsigned int key_count)
+        : values(values), key_count(key_count)
+    {
+        type = dynamic_cast<StructType *>(curr_named_types[std::string(name, name_len)]);
+        indexes = alloc_arr<unsigned int>(key_count);
+        for (unsigned int i = 0; i < key_count; i++)
+            indexes[i] = type->get_index(keys[i], key_lens[i]);
+    }
+    NewExprAST(StructType *type, char **keys, unsigned int *key_lens, ExprAST **values, unsigned int key_count)
+        : type(type), values(values), key_count(key_count)
+    {
+        indexes = alloc_arr<unsigned int>(key_count);
+        for (unsigned int i = 0; i < key_count; i++)
+            indexes[i] = type->get_index(keys[i], key_lens[i]);
+    }
+
+    Type *get_type()
+    {
+        return type;
+    }
+
+    LLVMValueRef gen_val()
+    {
+        LLVMValueRef ptr = LLVMBuildAlloca(curr_builder, type->llvm_type(), "newalloc");
+        for (unsigned int i = 0; i < key_count; i++)
+        {
+            LLVMValueRef llvm_indexes[2] = {LLVMConstInt(LLVMInt32Type(), 0, false), LLVMConstInt(LLVMInt32Type(), indexes[i], false)};
+
+            LLVMValueRef set_ptr = LLVMBuildStructGEP2(curr_builder, type->llvm_type(), ptr, indexes[i], "tmpgep"); // LLVMBuildGEP2(curr_builder, type->llvm_type(), ptr, llvm_indexes, key_count + 1, "tmpgep");
+            LLVMBuildStore(curr_builder, values[i]->gen_val(), set_ptr);
+        }
+        return ptr;
     }
 };
 
@@ -748,6 +825,7 @@ public:
         {
             llvm_arg_types[i] = arg_types[i]->llvm_type();
         }
+
         LLVMTypeRef function_type =
             LLVMFunctionType(return_type->llvm_type(), llvm_arg_types, arg_count, false);
 
@@ -763,16 +841,9 @@ public:
         LLVMPositionBuilderAtEnd(curr_builder, LLVMGetFirstBasicBlock(func));
         return func;
     }
-    void print_codegen_to(FILE *stream)
-    {
-        LLVMValueRef val = this->codegen();
-        char *str = LLVMPrintValueToString(val);
-        fprintf(stream, "%s\n", str);
-        LLVMDisposeMessage(str);
-    }
 };
 /// ExternExprAST - Expression class for defining an extern.
-class ExternExprAST
+class ExternExprAST : public TopLevelAST
 {
     LetExprAST *let = nullptr;
     PrototypeAST *prot = nullptr;
@@ -796,25 +867,18 @@ public:
         else
             curr_named_var_types[std::string(let->id, let->id_len)] = type;
     }
-    LLVMValueRef codegen()
+    void gen_toplevel()
     {
         register_extern();
         if (let)
-            return let->gen_declare();
+            let->gen_declare();
         else
-            return prot->codegen();
-    }
-    void print_codegen_to(FILE *stream)
-    {
-        LLVMValueRef val = this->codegen();
-        char *str = LLVMPrintValueToString(val);
-        fprintf(stream, "%s\n", str);
-        LLVMDisposeMessage(str);
+            prot->codegen();
     }
 };
 
 /// FunctionAST - This class represents a function definition itself.
-class FunctionAST
+class FunctionAST : public TopLevelAST
 {
     PrototypeAST *proto;
     ExprAST *body;
@@ -829,7 +893,7 @@ public:
         this->body = body;
     }
 
-    LLVMValueRef codegen()
+    void gen_toplevel()
     {
         // First, check for an existing function from a previous 'extern' declaration.
         LLVMValueRef func = LLVMGetNamedFunction(curr_module, proto->name);
@@ -838,7 +902,10 @@ public:
             func = proto->codegen();
 
         if (!func)
-            return nullptr;
+        {
+            error("funcless behavior");
+            return;
+        }
 
         if (LLVMCountBasicBlocks(func) != 0)
             error("Function cannot be redefined.");
@@ -852,28 +919,33 @@ public:
         size_t unused = 0;
         for (unsigned i = 0; i != args_len; ++i)
             curr_named_variables[LLVMGetValueName2(params[i], &unused)] = new ConstVariable(params[i], nullptr);
-        if (LLVMValueRef ret_val = body->gen_val())
-        {
-            // Finish off the function.
-            LLVMBuildRet(curr_builder, ret_val);
+        LLVMValueRef ret_val = body->gen_val();
+        // Finish off the function.
+        LLVMBuildRet(curr_builder, ret_val);
 
-            // doesnt exist in c api (i think)
-            // // Validate the generated code, checking for consistency.
-            // // verifyFunction(*TheFunction);
+        // doesnt exist in c api (i think)
+        // // Validate the generated code, checking for consistency.
+        // // verifyFunction(*TheFunction);
 
-            curr_named_variables.clear();
-            return func;
-        }
         curr_named_variables.clear();
-        // Error reading body, remove function.
-        LLVMDeleteFunction(func);
-        return nullptr;
     }
-    void print_codegen_to(FILE *stream)
+};
+
+class StructAST : public TopLevelAST
+{
+    char *name;
+    unsigned int name_len;
+    char **names;
+    unsigned int *name_lengths;
+    Type **types;
+    unsigned int count;
+
+public:
+    StructAST(char *name, unsigned int name_len, char **names, unsigned int *name_lengths, Type **types, unsigned int count) : name(name), name_len(name_len), names(names), name_lengths(name_lengths), types(types), count(count)
     {
-        LLVMValueRef val = this->codegen();
-        char *str = LLVMPrintValueToString(val);
-        fprintf(stream, "%s\n", str);
-        LLVMDisposeMessage(str);
+    }
+    void gen_toplevel()
+    {
+        curr_named_types[std::string(name, name_len)] = new StructType(name, name_len, names, name_lengths, types, count);
     }
 };

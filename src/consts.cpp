@@ -21,6 +21,8 @@ const int T_EXTERN = -12;    // extern
 const int T_LET = -13;       // let
 const int T_CONST = -14;     // const
 const int T_EQEQ = -15;      // ==
+const int T_STRUCT = -16;    // struct
+const int T_NEW = -17;       // new
 
 static LLVMContextRef curr_ctx;
 static LLVMBuilderRef curr_builder;

@@ -1,5 +1,5 @@
 # C functions/libraries can be used from fy
-extern fun puts(str: *char): int;
+extern fun puts(str: *char): void;
 fun main() {
   # "str" is a *char ending with a NUL-byte
   puts("Hello World!")
