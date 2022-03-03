@@ -38,7 +38,6 @@ static bool num_has_dot;           // Whether num_value contains '.' - Filled in
 static char num_type;              // Type of number. 'd' => double, 'f' => float, 'i' => int32, 'u' => uint32, 'b' => byte/char/uint8
 static char *string_value;         // "[^"]*" - Filled in if T_STRING
 static unsigned int string_length; // len(string_value) - Filled in if T_STRING
-static char string_type;           // 'c' - Filled in if T_STRING
 
 static int last_char = ' ';
 static void read_str(bool (*predicate)(char), char **output, unsigned int *length)
@@ -184,14 +183,8 @@ static int next_token()
                 str[str_len] = last_char;
             str_len++;
         }
-        {
-            // todo: figure out other types of strings? currently making every string a C-style string
-            // if (last_char != 'c')
-            //     error("expected 'c' after string literal");
-            string_type = 'c';
-            str[str_len] = '\0';
-            str_len++;
-        }
+        str[str_len] = '\0';
+        str_len++;
         str = realloc_c(str, str_len + 1);
         string_value = str;
         string_length = str_len;
@@ -339,9 +332,7 @@ static ExprAST *parse_char_expr()
 }
 static ExprAST *parse_string_expr()
 {
-    if (string_type != 'c')
-        error("string types that aren't 'c' not implemented yet");
-    auto result = new StringExprAST(string_value, string_length, StringType::C_STYLE_STRING);
+    auto result = new StringExprAST(string_value, string_length);
     get_next_token(); // consume string
     return result;
 }
@@ -440,7 +431,7 @@ static ExprAST *parse_block()
     return new BlockExprAST(exprs, expr_i);
 }
 
-static LetExprAST *parse_let_expr()
+static LetExprAST *parse_let_expr(bool global = false)
 {
     bool constant = false;
     if (curr_token == T_CONST)
@@ -468,7 +459,7 @@ static LetExprAST *parse_let_expr()
         value = parse_expr();
     }
 
-    return new LetExprAST(id, id_len, type, value, constant);
+    return new LetExprAST(id, id_len, type, value, constant, global);
 }
 
 /// primary
@@ -686,6 +677,17 @@ static void handle_extern()
         // Skip token for error recovery.
         get_next_token();
 }
+static void handle_global_let()
+{
+    if (auto ast = parse_let_expr(true))
+    {
+        fprintf(stderr, "Parsed a global variable\n");
+        ast->print_codegen_to(stderr);
+    }
+    else
+        // Skip token for error recovery.
+        get_next_token();
+}
 
 /// top ::= definition | external | expression | ';'
 static void main_loop()
@@ -705,6 +707,10 @@ static void main_loop()
             break;
         case T_EXTERN:
             handle_extern();
+            break;
+        case T_CONST:
+        case T_LET:
+            handle_global_let();
             break;
         default:
             fprintf(stderr, "Unexpected token '%c' (%d) at top-level", curr_token, curr_token);

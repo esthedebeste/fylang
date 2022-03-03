@@ -4,10 +4,10 @@
 #include <string>
 #include "utils.cpp"
 #include "types.cpp"
+#include "variables.cpp"
 
 // Includes function arguments
-static std::map<std::string, LLVMValueRef> curr_named_consts;
-static std::map<std::string, LLVMValueRef> curr_named_var_ptrs;
+static std::map<std::string, Variable *> curr_named_variables;
 static std::map<std::string, Type *> curr_named_var_types;
 static std::map<std::string, FunctionType *> curr_named_functions;
 
@@ -65,8 +65,14 @@ NumType *num_char_to_type(char type_char, bool has_dot)
         return nullptr;
     }
 }
+/// ConstantExpr - Base class for all const-able expression nodes.
+class ConstantExpr
+{
+public:
+    virtual Variable *gen_variable(char *name, bool constant) = 0;
+};
 /// NumberExprAST - Expression class for numeric literals like "1.0".
-class NumberExprAST : public ExprAST
+class NumberExprAST : public ExprAST, public ConstantExpr
 {
     char *val;
     unsigned int val_len;
@@ -95,6 +101,16 @@ public:
         else
             return LLVMConstIntOfStringAndSize(type->llvm_type(), val, val_len, base);
     }
+    Variable *gen_variable(char *name, bool constant)
+    {
+        if (constant)
+            return new ConstVariable(gen_val(), nullptr);
+        LLVMValueRef val = gen_val();
+        LLVMValueRef glob = LLVMAddGlobal(curr_module, type->llvm_type(), name);
+        LLVMSetGlobalConstant(glob, false);
+        LLVMSetInitializer(glob, val);
+        return new BasicLoadVariable(glob, type);
+    }
 };
 
 /// VariableExprAST - Expression class for referencing a variable, like "a".
@@ -120,30 +136,17 @@ public:
     }
     LLVMValueRef gen_val()
     {
-        LLVMValueRef ptr = curr_named_var_ptrs[name];
-        if (!ptr)
-        {
-            LLVMValueRef V = curr_named_consts[name];
-            if (!V)
-                error("non-existent variable");
-            return V;
-        }
-        return LLVMBuildLoad2(curr_builder, get_type()->llvm_type(), ptr, "tmpload");
+        Variable *v = curr_named_variables[name];
+        if (!v)
+            error("non-existent variable");
+        return v->gen_load();
     }
     LLVMValueRef gen_ptr()
     {
-        LLVMValueRef V = curr_named_var_ptrs[name];
-        if (!V)
-        {
-            LLVMValueRef value = curr_named_consts[name];
-            if (!value)
-                error("non-existent variable");
-            LLVMValueRef ptr = LLVMBuildAlloca(curr_builder, get_type()->llvm_type(), "alloctmp");
-            // convert param to variable
-            curr_named_var_ptrs[name] = LLVMBuildStore(curr_builder, gen_val(), ptr);
-            return ptr;
-        }
-        return V;
+        Variable *v = curr_named_variables[name];
+        if (!v)
+            error("non-existent variable");
+        return v->gen_ptr();
     }
 };
 
@@ -157,7 +160,8 @@ public:
     Type *type;
     ExprAST *value;
     bool constant;
-    LetExprAST(char *id, unsigned int id_len, Type *type, ExprAST *value, bool constant) : id(id), id_len(id_len), constant(constant)
+    bool global;
+    LetExprAST(char *id, unsigned int id_len, Type *type, ExprAST *value, bool constant, bool global) : id(id), id_len(id_len), constant(constant), global(global)
     {
         if (type)
             curr_named_var_types[std::string(id, id_len)] = type;
@@ -174,15 +178,31 @@ public:
     }
     LLVMValueRef gen_val()
     {
+        if (global)
+        {
+            Variable *var;
+            if (!value)
+                var = new BasicLoadVariable(LLVMAddGlobal(curr_module, type->llvm_type(), id), type);
+            else if (ConstantExpr *expr = dynamic_cast<ConstantExpr *>(value))
+                var = expr->gen_variable(id, constant);
+            else
+                error("Global variable needs a constant value inside it");
+            curr_named_variables[std::string(id, id_len)] = var;
+            return nullptr;
+        }
         if (constant)
         {
             if (value)
-                return curr_named_consts[std::string(id, id_len)] = value->gen_val();
+            {
+                LLVMValueRef const_val = value->gen_val();
+                curr_named_variables[std::string(id, id_len)] = new ConstVariable(const_val, nullptr);
+                return const_val;
+            }
             else
                 error("Constant variables need an initialization value");
         }
         LLVMValueRef ptr = LLVMBuildAlloca(curr_builder, type->llvm_type(), id);
-        curr_named_var_ptrs[std::string(id, id_len)] = ptr;
+        curr_named_variables[std::string(id, id_len)] = new BasicLoadVariable(ptr, type);
         if (value)
         {
             LLVMValueRef llvm_val = value->gen_val();
@@ -197,7 +217,7 @@ public:
         if (constant)
             error("Can't point to a constant");
         LLVMValueRef ptr = LLVMBuildAlloca(curr_builder, type->llvm_type(), id);
-        curr_named_var_ptrs[std::string(id, id_len)] = ptr;
+        curr_named_variables[std::string(id, id_len)] = new BasicLoadVariable(ptr, type);
         if (value)
         {
             LLVMValueRef llvm_val = value->gen_val();
@@ -208,7 +228,7 @@ public:
     LLVMValueRef gen_declare()
     {
         LLVMValueRef global = LLVMAddGlobal(curr_module, type->llvm_type(), id);
-        curr_named_var_ptrs[std::string(id, id_len)] = global;
+        curr_named_variables[std::string(id, id_len)] = new BasicLoadVariable(global, type);
         return global;
     }
 };
@@ -230,50 +250,43 @@ public:
     }
 };
 
-enum StringType
-{
-    C_STYLE_STRING = 0 // '\0'-terminated, pointer
-};
 /// StringExprAST - Expression class for multiple chars ("hello")
-class StringExprAST : public ExprAST
+class StringExprAST : public ExprAST, public ConstantExpr
 {
     char *chars;
     unsigned int length;
-    StringType string_type;
-    Type *type;
+    PointerType *type;
+    ArrayType *array_type;
 
 public:
-    StringExprAST(char *chars, unsigned int length, StringType string_type) : chars(chars), length(length), string_type(string_type)
+    StringExprAST(char *chars, unsigned int length) : chars(chars), length(length)
     {
-        if (string_type == C_STYLE_STRING && chars[length - 1] != '\0')
+        if (chars[length - 1] != '\0')
             error("C-style strings should be fed into StringExprAST including the last null-byte");
-        switch (string_type)
-        {
-        case C_STYLE_STRING:
-            type = (Type *)new PointerType(new NumType(8, false, false));
-            break;
-        default:
-            fprintf(stderr, "Error: Unimplemented string type %d", string_type);
-            exit(1);
-        }
+        type = new PointerType(new NumType(8, false, false));
+        array_type = new ArrayType(new NumType(8, false, false), length);
     }
-    Type *get_type()
+    PointerType *get_type()
     {
         return type;
     }
+    ArrayType *get_array_type()
+    {
+        return array_type;
+    }
     LLVMValueRef gen_val()
     {
-        LLVMValueRef str = LLVMBuildGlobalString(curr_builder, chars, "str");
-        LLVMSetGlobalConstant(str, false);
-        switch (string_type)
-        {
-        case C_STYLE_STRING:
-            return LLVMBuildPointerCast(curr_builder, str, get_type()->llvm_type(), "strptr");
-        default:
-            fprintf(stderr, "Error: Unimplemented string type %d", string_type);
-            exit(1);
-            return nullptr;
-        }
+        return gen_variable((char *)".str", false)->gen_load();
+    }
+    Variable *gen_variable(char *name, bool constant)
+    {
+        LLVMValueRef str = LLVMConstString(chars, length, true);
+        LLVMValueRef zeros[2] = {LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false), LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false)};
+        LLVMValueRef glob = LLVMAddGlobal(curr_module, get_array_type()->llvm_type(), name);
+        LLVMSetInitializer(glob, str);
+        LLVMSetGlobalConstant(glob, constant);
+        LLVMValueRef cast = LLVMConstGEP2(get_array_type()->llvm_type(), glob, zeros, 2);
+        return new ConstVariable(cast, glob);
     }
 };
 
@@ -540,8 +553,7 @@ public:
         {
             args_v[i] = args[i]->gen_val();
         }
-        // todo update to llvmbuildcall2
-        return LLVMBuildCall(curr_builder, callee_f, args_v, args_v_len, "calltmp");
+        return LLVMBuildCall2(curr_builder, curr_named_functions[std::string(callee, callee_len)]->llvm_type(), callee_f, args_v, args_v_len, "calltmp");
     }
 };
 
@@ -748,6 +760,7 @@ public:
             LLVMSetValueName2(params[i], arg_names[i], arg_name_lengths[i]);
 
         LLVMSetValueName2(func, name, name_len);
+        LLVMPositionBuilderAtEnd(curr_builder, LLVMGetFirstBasicBlock(func));
         return func;
     }
     void print_codegen_to(FILE *stream)
@@ -838,7 +851,7 @@ public:
         LLVMGetParams(func, params);
         size_t unused = 0;
         for (unsigned i = 0; i != args_len; ++i)
-            curr_named_consts[LLVMGetValueName2(params[i], &unused)] = params[i];
+            curr_named_variables[LLVMGetValueName2(params[i], &unused)] = new ConstVariable(params[i], nullptr);
         if (LLVMValueRef ret_val = body->gen_val())
         {
             // Finish off the function.
@@ -848,10 +861,10 @@ public:
             // // Validate the generated code, checking for consistency.
             // // verifyFunction(*TheFunction);
 
-            curr_named_consts.clear();
+            curr_named_variables.clear();
             return func;
         }
-        curr_named_consts.clear();
+        curr_named_variables.clear();
         // Error reading body, remove function.
         LLVMDeleteFunction(func);
         return nullptr;

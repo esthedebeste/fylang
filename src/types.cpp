@@ -18,7 +18,8 @@ enum TypeType
     Void = 0,
     Number = 1,
     Pointer = 2,
-    Function = 3
+    Function = 3,
+    Array = 4
 };
 static const char *tt_to_str(TypeType tt)
 {
@@ -32,6 +33,8 @@ static const char *tt_to_str(TypeType tt)
         return "pointer";
     case Function:
         return "function";
+    case Array:
+        return "array";
     }
 };
 /// Base type class.
@@ -198,6 +201,56 @@ public:
             return;
         PointerType *b = dynamic_cast<PointerType *>(other);
         return this->get_points_to()->log_diff(b->get_points_to());
+    }
+};
+class ArrayType : public Type
+{
+public:
+    Type *elem;
+    unsigned int count;
+    ArrayType(Type *elem, unsigned int count) : elem(elem), count(count)
+    {
+    }
+    Type *get_elem_type()
+    {
+        return elem;
+    }
+    unsigned int get_elem_count()
+    {
+        return count;
+    }
+    unsigned int get_byte_size()
+    {
+        return elem->get_byte_size() * count;
+    }
+    unsigned int get_bit_size()
+    {
+        return elem->get_bit_size() * count;
+    }
+    LLVMTypeRef llvm_type()
+    {
+        return LLVMArrayType(elem->llvm_type(), count);
+    }
+    TypeType type_type()
+    {
+        return TypeType::Array;
+    }
+    bool eq(Type *other)
+    {
+        if (ArrayType *other_arr = dynamic_cast<ArrayType *>(other))
+            return other_arr->elem->eq(this->elem) && other_arr->count == this->count;
+        return false;
+    }
+    void log_diff(Type *other)
+    {
+        if (log_type_diff(other))
+            return;
+        ArrayType *b = dynamic_cast<ArrayType *>(other);
+        unsigned int a_count = this->count;
+        unsigned int b_count = b->count;
+        if (a_count != b_count)
+            fprintf(stderr, "\n\t- amount: A=%d, B=%d", a_count, b_count);
+        b->elem->log_diff(this->elem);
     }
 };
 class FunctionType : public Type
