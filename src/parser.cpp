@@ -30,29 +30,30 @@ static ExprAST *parse_expr();
 static ExprAST *parse_primary();
 static ExprAST *parse_unary();
 
-static Type *parse_type();
-static Type *parse_type_unary()
+static Type *parse_type_unary();
+static Type *parse_function_type()
 {
-    // If the current token is not a unary type operator, just parse type
-    if (!(curr_token == '&' || curr_token == '*'))
-        return parse_type();
-
-    // If this is a unary operator, read it.
-    int opc = curr_token;
-    get_next_token();
-    if (Type *operand = parse_type_unary())
+    eat(T_FUNCTION, (char *)"fun");
+    eat('(');
+    Type **arg_types = alloc_arr<Type *>(64);
+    unsigned int args_len = 0;
+    if (curr_token != ')')
     {
-        if (opc == '*')
-            return new PointerType(operand);
-        else if (opc == '&')
+        while (1)
         {
-            if (PointerType *ptr = dynamic_cast<PointerType *>(operand))
-                return ptr->get_points_to();
-            else
-                error("use of & type operator without pointer on right-hand side");
+            if (auto arg = parse_type_unary())
+                arg_types[args_len++] = arg;
+            if (curr_token == ')')
+                break;
+            if (curr_token != ',')
+                error("Expected ')' or ',' in argument list");
+            get_next_token();
         }
     }
-    return nullptr;
+    eat(')');
+    eat(':');
+    Type *return_type = parse_type_unary();
+    return new FunctionType(return_type, arg_types, args_len);
 }
 
 static Type *parse_type()
@@ -89,11 +90,35 @@ static Type *parse_type()
             return new NumType(1, false, false);
         else if (streq(id, id_len, "void", 4))
             return new VoidType();
-        else if (curr_named_types[std::string(id, id_len)])
-            return curr_named_types[std::string(id, id_len)];
+        else if (curr_named_structs[std::string(id, id_len)])
+            return curr_named_structs[std::string(id, id_len)];
     }
 }
 
+static Type *parse_type_unary()
+{
+    if (curr_token == T_FUNCTION)
+        return parse_function_type();
+    // If the current token is not a unary type operator, just parse type
+    if (!(curr_token == '&' || curr_token == '*'))
+        return parse_type();
+    // If this is a unary operator, read it.
+    int opc = curr_token;
+    get_next_token();
+    if (Type *operand = parse_type_unary())
+    {
+        if (opc == '*')
+            return new PointerType(operand);
+        else if (opc == '&')
+        {
+            if (PointerType *ptr = dynamic_cast<PointerType *>(operand))
+                return ptr->get_points_to();
+            else
+                error("use of & type operator without pointer on right-hand side");
+        }
+    }
+    return nullptr;
+}
 static ExprAST *parse_number_expr()
 {
     // TODO: parse number base (hex 0x, binary 0b, octal 0o)
@@ -124,41 +149,12 @@ static ExprAST *parse_paren_expr()
 
 /// identifierexpr
 ///   ::= identifier
-///   ::= identifier '(' expression* ')'
 static ExprAST *parse_identifier_expr()
 {
     char *id = identifier_string;
     unsigned int id_len = identifier_string_length;
     eat(T_IDENTIFIER, (char *)"identifier");
-    switch (curr_token)
-    {
-    case '(':
-    {
-        // function call
-        eat('(');
-        std::vector<ExprAST *> args;
-        if (curr_token != ')')
-        {
-            while (1)
-            {
-                if (auto arg = parse_expr())
-                    args.push_back(arg);
-                else
-                    return nullptr;
-                if (curr_token == ')')
-                    break;
-                if (curr_token != ',')
-                    error("Expected ')' or ',' in argument list");
-                get_next_token();
-            }
-        }
-        eat(')');
-        return new CallExprAST(id, id_len, args);
-    }
-    default:
-        // variable ref
-        return new VariableExprAST(id, id_len);
-    }
+    return new VariableExprAST(id, id_len);
 }
 /// ifexpr ::= 'if' (expression) expression 'else' expression
 static ExprAST *parse_if_expr()
@@ -332,6 +328,31 @@ static ExprAST *parse_postfix()
             prev = new PropAccessExprAST(id, id_len, prev);
             break;
         }
+        case '(':
+        {
+            // function call
+            eat('(');
+            ExprAST **args = alloc_arr<ExprAST *>(64);
+            unsigned int args_len = 0;
+            if (curr_token != ')')
+            {
+                while (1)
+                {
+                    if (auto arg = parse_expr())
+                        args[args_len++] = arg;
+                    else
+                        return nullptr;
+                    if (curr_token == ')')
+                        break;
+                    if (curr_token != ',')
+                        error("Expected ')' or ',' in argument list");
+                    get_next_token();
+                }
+            }
+            eat(')');
+            prev = new CallExprAST(prev, args, args_len);
+            break;
+        }
         }
 }
 /// unary
@@ -490,15 +511,21 @@ static StructAST *parse_struct()
     if (curr_token != '}')
         while (1)
         {
-            key_names[key_count] = identifier_string;
-            key_name_lens[key_count] = identifier_string_length;
+            char *id = identifier_string;
+            unsigned int id_len = identifier_string_length;
             eat(T_IDENTIFIER, (char *)"identifier");
-            eat(':');
-            key_types[key_count] = parse_type_unary();
-            key_count++;
-            if (curr_token == '}')
-                break;
-            eat(',');
+            if (curr_token == ':')
+            {
+                key_names[key_count] = id;
+                key_name_lens[key_count] = id_len;
+                // value
+                eat(':');
+                key_types[key_count] = parse_type_unary();
+                key_count++;
+                if (curr_token == '}')
+                    break;
+                eat(',');
+            }
         }
     eat('}');
     key_names = realloc_arr<char *>(key_names, key_count);

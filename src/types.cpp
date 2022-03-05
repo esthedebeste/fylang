@@ -233,11 +233,13 @@ class StructType : public Type
     LLVMTypeRef llvm_struct_type;
 
 public:
+    char *name;
+    unsigned int name_len;
     Type **types;
-    char **names;
-    unsigned int *name_lengths;
+    char **keys;
+    unsigned int *key_lengths;
     unsigned int count;
-    StructType(char *name, unsigned int name_len, char **names, unsigned int *name_lengths, Type **types, unsigned int count) : names(names), name_lengths(name_lengths), types(types), count(count)
+    StructType(char *name, unsigned int name_len, char **keys, unsigned int *key_lengths, Type **types, unsigned int count) : name(name), name_len(name_len), keys(keys), key_lengths(key_lengths), types(types), count(count)
     {
         LLVMTypeRef *llvm_types = alloc_arr<LLVMTypeRef>(count);
         for (unsigned int i = 0; i < count; i++)
@@ -255,10 +257,10 @@ public:
     {
         for (unsigned int i = 0; i < count; i++)
         {
-            if (name_lengths[i] == name_len)
+            if (key_lengths[i] == name_len)
             {
                 for (unsigned int j = 0; j < name_len; j++)
-                    if (names[i][j] != name[j])
+                    if (keys[i][j] != name[j])
                         continue;
                 return i;
             }
@@ -292,7 +294,9 @@ public:
     Type **arguments;
     unsigned int arguments_len;
 
-    FunctionType(Type *return_type, Type **arguments, unsigned int arguments_len) : return_type(return_type), arguments(arguments), arguments_len(arguments_len) {}
+    FunctionType(Type *return_type, Type **arguments, unsigned int arguments_len) : return_type(return_type), arguments(arguments), arguments_len(arguments_len)
+    {
+    }
     LLVMTypeRef llvm_type()
     {
         LLVMTypeRef *llvm_args = alloc_arr<LLVMTypeRef>(arguments_len);

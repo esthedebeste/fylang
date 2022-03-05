@@ -127,9 +127,6 @@ int main(int argc, char **argv)
     // create builder, context, and pass manager (for optimization)
     curr_builder = LLVMCreateBuilder();
     curr_ctx = LLVMGetGlobalContext();
-    curr_pass_manager = LLVMCreateFunctionPassManagerForModule(curr_module);
-    LLVMAddAnalysisPasses(target_machine, curr_pass_manager);
-    LLVMInitializeFunctionPassManager(curr_pass_manager);
 
     // open .fy file
     current_file = fopen(argv[1], "r");
@@ -147,10 +144,8 @@ int main(int argc, char **argv)
     fprintf(output_file, "%s", output);
     // dispose of a bunch of stuff
     LLVMDisposeMessage(output);
-    LLVMFinalizeFunctionPassManager(curr_pass_manager);
     LLVMDisposeModule(curr_module);
     LLVMDisposeBuilder(curr_builder);
-    LLVMDisposePassManager(curr_pass_manager);
     LLVMDisposeMessage(target_triple);
     LLVMDisposeMessage(host_cpu_name);
     LLVMDisposeMessage(host_cpu_features);

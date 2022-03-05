@@ -27,5 +27,4 @@ const int T_NEW = -17;       // new
 static LLVMContextRef curr_ctx;
 static LLVMBuilderRef curr_builder;
 static LLVMModuleRef curr_module;
-static LLVMPassManagerRef curr_pass_manager;
 static LLVMTargetDataRef target_data;

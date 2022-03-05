@@ -10,8 +10,7 @@
 // Includes function arguments
 static std::map<std::string, Variable *> curr_named_variables;
 static std::map<std::string, Type *> curr_named_var_types;
-static std::map<std::string, Type *> curr_named_types;
-static std::map<std::string, FunctionType *> curr_named_functions;
+static std::map<std::string, StructType *> curr_named_structs;
 
 class TopLevelAST
 {
@@ -126,7 +125,7 @@ public:
         type = curr_named_var_types[name];
         if (!type)
         {
-            fprintf(stderr, "Variable '%s' doesn't exist.", name);
+            fprintf(stderr, "Error: Variable '%s' doesn't exist.", name);
             exit(1);
         }
     }
@@ -136,16 +135,23 @@ public:
     }
     LLVMValueRef gen_val()
     {
-        Variable *v = curr_named_variables[name];
+        Variable *v = curr_named_variables[std::string(name, name_len)];
         if (!v)
-            error("non-existent variable");
+        {
+
+            fprintf(stderr, "Error: Variable '%s' doesn't exist.", name);
+            exit(1);
+        }
         return v->gen_load();
     }
     LLVMValueRef gen_ptr()
     {
-        Variable *v = curr_named_variables[name];
+        Variable *v = curr_named_variables[std::string(name, name_len)];
         if (!v)
-            error("non-existent variable");
+        {
+            fprintf(stderr, "Error: Variable '%s' doesn't exist.", name);
+            exit(1);
+        }
         return v->gen_ptr();
     }
 };
@@ -494,7 +500,10 @@ public:
             return LLVMBuildLoad2(curr_builder, pt->get_points_to()->llvm_type(), operand->gen_val(), "loadtmp");
         }
         case '&':
-            return operand->gen_ptr();
+            if (operand->get_type()->type_type() == TypeType::Function)
+                return operand->gen_val();
+            else
+                return operand->gen_ptr();
         default:
             fprintf(stderr, "Error: invalid prefix unary operator '%c'", op);
             exit(1);
@@ -512,22 +521,37 @@ public:
 /// CallExprAST - Expression class for function calls.
 class CallExprAST : public ExprAST
 {
-    char *callee;
-    unsigned int callee_len;
-    std::vector<ExprAST *> args;
+    FunctionType *func_t;
+    ExprAST *called;
+    ExprAST **args;
+    unsigned int args_len;
+    bool is_ptr;
     Type *type;
 
 public:
-    CallExprAST(char *callee, unsigned int callee_len, std::vector<ExprAST *> args)
-        : callee(callee), callee_len(callee_len), args(args)
+    CallExprAST(ExprAST *called, ExprAST **args, unsigned int args_len)
+        : called(called), args(args), args_len(args_len)
     {
-        FunctionType *func = curr_named_functions[std::string(callee, callee_len)];
-        if (!func)
+        func_t = dynamic_cast<FunctionType *>(called->get_type());
+        if (!func_t)
         {
-            fprintf(stderr, "Error: Function '%s' doesn't exist", callee);
+            if (PointerType *ptr = dynamic_cast<PointerType *>(called->get_type()))
+                func_t = dynamic_cast<FunctionType *>(ptr->get_points_to());
+            else
+            {
+
+                fprintf(stderr, "Error: Function doesn't exist or is not a function");
+                exit(1);
+            }
+        }
+        if (args_len != func_t->arguments_len)
+        {
+
+            fprintf(stderr, "Error: Incorrect # arguments passed. (Expected %d, got %d)", func_t->arguments_len, args_len);
             exit(1);
         }
-        type = func->return_type;
+
+        type = func_t->return_type;
     }
 
     Type *get_type()
@@ -536,24 +560,13 @@ public:
     }
     LLVMValueRef gen_val()
     {
-        // Look up the name in the global module table.
-
-        LLVMValueRef callee_f = LLVMGetNamedFunction(curr_module, callee);
-        if (!callee_f)
+        LLVMValueRef func = called->gen_val();
+        if (!func)
             error("Unknown function referenced");
-
-        // If argument mismatch error.
-        if (LLVMCountParams(callee_f) != args.size())
-            error("Incorrect # arguments passed");
-
-        LLVMValueRef *args_v = alloc_arr<LLVMValueRef>(args.size());
-        unsigned int args_v_len = args.size();
-        for (unsigned i = 0, e = args.size(); i != e; ++i)
-        {
-            args_v[i] = args[i]->gen_val();
-        }
-        FunctionType *ft = curr_named_functions[std::string(callee, callee_len)];
-        return LLVMBuildCall2(curr_builder, ft->llvm_type(), callee_f, args_v, args_v_len, ft->return_type->type_type() == TypeType::Void ? "" : "calltmp");
+        LLVMValueRef *arg_vs = alloc_arr<LLVMValueRef>(args_len);
+        for (unsigned i = 0; i < args_len; i++)
+            arg_vs[i] = args[i]->gen_val();
+        return LLVMBuildCall2(curr_builder, func_t->llvm_type(), func, arg_vs, args_len, type->type_type() == TypeType::Void ? "" : "calltmp");
     }
 };
 
@@ -585,8 +598,7 @@ public:
     }
     LLVMValueRef gen_ptr()
     {
-        LLVMValueRef llvm_indexes[2] = {LLVMConstInt(LLVMInt32Type(), 0, false), LLVMConstInt(LLVMInt32Type(), index, false)};
-        return LLVMBuildGEP2(curr_builder, source_type->llvm_type(), source->gen_val(), llvm_indexes, 2, "tmpgep");
+        return LLVMBuildStructGEP2(curr_builder, source_type->llvm_type(), source->gen_val(), index, "tmpgep");
     }
 };
 
@@ -602,7 +614,7 @@ public:
     NewExprAST(char *name, unsigned int name_len, char **keys, unsigned int *key_lens, ExprAST **values, unsigned int key_count)
         : values(values), key_count(key_count)
     {
-        type = dynamic_cast<StructType *>(curr_named_types[std::string(name, name_len)]);
+        type = dynamic_cast<StructType *>(curr_named_structs[std::string(name, name_len)]);
         indexes = alloc_arr<unsigned int>(key_count);
         for (unsigned int i = 0; i < key_count; i++)
             indexes[i] = type->get_index(keys[i], key_lens[i]);
@@ -692,10 +704,9 @@ public:
             if (n->is_floating)
                 cond_v = LLVMBuildFCmp(curr_builder, LLVMRealONE, cond_v, LLVMConstReal(float_64_type, 0.0), "ifcond");
         LLVMValueRef func = LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder));
-
-        LLVMBasicBlockRef then_bb = LLVMAppendBasicBlockInContext(curr_ctx, func, "then");
-        LLVMBasicBlockRef else_bb = LLVMCreateBasicBlockInContext(curr_ctx, "else");
-        LLVMBasicBlockRef merge_bb = LLVMCreateBasicBlockInContext(curr_ctx, "ifcont");
+        LLVMBasicBlockRef then_bb = LLVMAppendBasicBlockInContext(curr_ctx, func, "ifthen");
+        LLVMBasicBlockRef else_bb = LLVMCreateBasicBlockInContext(curr_ctx, "ifelse");
+        LLVMBasicBlockRef merge_bb = LLVMCreateBasicBlockInContext(curr_ctx, "ifmerge");
         // if
         LLVMBuildCondBr(curr_builder, cond_v, then_bb, else_bb);
         // then
@@ -714,7 +725,7 @@ public:
         // merge
         LLVMAppendExistingBasicBlock(func, merge_bb);
         LLVMPositionBuilderAtEnd(curr_builder, merge_bb);
-        LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), "iftmp");
+        LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), "ifphi");
         // todo merge idk
         LLVMAddIncoming(phi, &then_v, &then_bb, 1);
         LLVMAddIncoming(phi, &else_v, &else_bb, 1);
@@ -736,7 +747,7 @@ public:
         Type *else_t = elze->get_type();
         if (then_t->neq(else_t))
         {
-            fprintf(stderr, "while's then and else side don't have the same type: ");
+            fprintf(stderr, "Error: while's then and else side don't have the same type: ");
             then_t->log_diff(else_t);
             exit(1);
         }
@@ -753,22 +764,21 @@ public:
         LLVMValueRef cond_v = cond->gen_val();
         if (NumType *n = dynamic_cast<NumType *>(cond->get_type()))
             if (n->is_floating)
-                cond_v = LLVMBuildFCmp(curr_builder, LLVMRealONE, cond_v, LLVMConstReal(float_64_type, 0.0), "ifcond");
+                cond_v = LLVMBuildFCmp(curr_builder, LLVMRealONE, cond_v, LLVMConstReal(float_64_type, 0.0), "whilecond");
         LLVMValueRef func = LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder));
-
         LLVMBasicBlockRef then_bb = LLVMAppendBasicBlockInContext(curr_ctx, func, "whilethen");
-        LLVMBasicBlockRef else_bb = LLVMAppendBasicBlockInContext(curr_ctx, func, "whileelse");
+        LLVMBasicBlockRef else_bb = LLVMCreateBasicBlockInContext(curr_ctx, "whileelse");
         LLVMBasicBlockRef merge_bb = LLVMCreateBasicBlockInContext(curr_ctx, "endwhile");
         // while
         LLVMBuildCondBr(curr_builder, cond_v, then_bb, else_bb);
         // then
         LLVMPositionBuilderAtEnd(curr_builder, then_bb);
         LLVMValueRef then_v = then->gen_val();
-        cond_v = cond->gen_val();
+        LLVMValueRef cond_v2 = cond->gen_val();
         if (NumType *n = dynamic_cast<NumType *>(cond->get_type()))
             if (n->is_floating)
-                cond_v = LLVMBuildFCmp(curr_builder, LLVMRealONE, cond_v, LLVMConstReal(float_64_type, 0.0), "ifcond");
-        LLVMBuildCondBr(curr_builder, cond_v, then_bb, merge_bb);
+                cond_v2 = LLVMBuildFCmp(curr_builder, LLVMRealONE, cond_v, LLVMConstReal(float_64_type, 0.0), "whilecond");
+        LLVMBuildCondBr(curr_builder, cond_v2, then_bb, merge_bb);
         // Codegen of 'then' can change the current block, update then_bb for the PHI.
         then_bb = LLVMGetInsertBlock(curr_builder);
         // else
@@ -781,7 +791,7 @@ public:
         // merge
         LLVMAppendExistingBasicBlock(func, merge_bb);
         LLVMPositionBuilderAtEnd(curr_builder, merge_bb);
-        LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), "iftmp");
+        LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), "whilephi");
         // todo merge idk
         LLVMAddIncoming(phi, &then_v, &then_bb, 1);
         LLVMAddIncoming(phi, &else_v, &else_bb, 1);
@@ -811,7 +821,7 @@ public:
     {
         for (unsigned i = 0; i != arg_count; ++i)
             curr_named_var_types[std::string(arg_names[i], arg_name_lengths[i])] = arg_types[i];
-        type = curr_named_functions[std::string(name, name_len)] = new FunctionType(return_type, arg_types, arg_count);
+        curr_named_var_types[std::string(name, name_len)] = type = new FunctionType(return_type, arg_types, arg_count);
     }
     FunctionType *get_type()
     {
@@ -831,6 +841,7 @@ public:
 
         LLVMValueRef func =
             LLVMAddFunction(curr_module, name, function_type);
+        curr_named_variables[std::string(name, name_len)] = new ConstVariable(func, nullptr);
         // Set names for all arguments.
         LLVMValueRef *params = alloc_arr<LLVMValueRef>(arg_count);
         LLVMGetParams(func, params);
@@ -863,7 +874,7 @@ public:
     void register_extern()
     {
         if (FunctionType *fun_t = dynamic_cast<FunctionType *>(type))
-            curr_named_functions[std::string(prot->name, prot->name_len)] = fun_t;
+            curr_named_var_types[std::string(prot->name, prot->name_len)] = fun_t;
         else
             curr_named_var_types[std::string(let->id, let->id_len)] = type;
     }
@@ -922,12 +933,9 @@ public:
         LLVMValueRef ret_val = body->gen_val();
         // Finish off the function.
         LLVMBuildRet(curr_builder, ret_val);
-
         // doesnt exist in c api (i think)
         // // Validate the generated code, checking for consistency.
         // // verifyFunction(*TheFunction);
-
-        curr_named_variables.clear();
     }
 };
 
@@ -946,6 +954,6 @@ public:
     }
     void gen_toplevel()
     {
-        curr_named_types[std::string(name, name_len)] = new StructType(name, name_len, names, name_lengths, types, count);
+        curr_named_structs[std::string(name, name_len)] = new StructType(name, name_len, names, name_lengths, types, count);
     }
 };
