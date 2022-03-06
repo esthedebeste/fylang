@@ -14,12 +14,11 @@ fun put_filtered(str: *char, predicate: *fun(char): bool): int {
 }
 
 fun is_alphanum(ch: char): bool
-  ((ch > 'a'-1) & (ch < 'z'+1)) | ((ch > 'A'-1) & (ch < 'Z'+1)) | ((ch > '0'-1) & (ch < '9'+1))
+  (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
 
 fun main(): int {
   let str = "F@#(*i@#&l!#*(&t@$&*e!@)r@#()e{:><}d#!@*("
   # We pass the is_alphanum function to put_filtered as a predicate
-  put_filtered(str, &is_alphanum)
+  put_filtered(str, is_alphanum)
   0i
 }
-
