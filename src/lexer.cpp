@@ -146,13 +146,6 @@ static int next_token() {
     string_length = str_len;
     last_char = next_char();
     return T_STRING;
-  } else if (last_char == '#') {
-    // #[^\n\r]*
-    do
-      last_char = next_char();
-    while (last_char != EOF && last_char != '\n' && last_char != '\r');
-    return next_token(); // could recurse overflow, might make a wrapper
-                         // function that while's and a T_COMMENT type
   } else if (last_char == '\'') {
     // Char: '[^']'
     last_char = next_char(); // eat '
@@ -195,6 +188,28 @@ static int next_token() {
     last_char = next_char();
     return T_LAND;
   }
-  return curr_char;
+  if (curr_char == '/') {
+    if (last_char == '/') {
+      // Comment: //[^\n\r]*
+      do
+        last_char = next_char();
+      while (last_char != EOF && last_char != '\n' && last_char != '\r');
+      return next_token(); // could recurse overflow, might make a wrapper
+                           // function that while's and a T_COMMENT type
+    } else if (last_char == '*') {
+      // Comment: /* .* */
+      char last;
+      do {
+        last = last_char;
+        last_char = next_char();
+      } while (last_char != EOF && !(last == '*' && last_char == '/'));
+      last_char = next_char();
+    } else
+      return curr_char;
+    return next_token(); // could recurse overflow, might make a wrapper
+                         // function that while's and a T_COMMENT type
+  }
+
   // Otherwise, just return the character as its ascii value.
+  return curr_char;
 }

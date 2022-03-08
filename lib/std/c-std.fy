@@ -1,4 +1,4 @@
-# declares C globals
+// declares C globals
 struct unknown {}
 declare const stderr: *unknown
 declare fun fputc(ch: char, stream: *unknown): int
