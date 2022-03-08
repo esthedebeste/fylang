@@ -1,4 +1,4 @@
-extern fun puts(str: *char): void
+declare fun puts(str: *char): void
 const str = "Hello World!\n"
 fun main() {
     puts(str)

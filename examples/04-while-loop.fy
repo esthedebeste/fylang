@@ -1,7 +1,7 @@
-extern fun putchar(ch: char): int
-extern const stderr: *void
-extern fun fputs(str: *char, stream: *void): int
-extern fun strlen(str: *char): int
+declare fun putchar(ch: char): int
+declare const stderr: *void
+declare fun fputs(str: *char, stream: *void): int
+declare fun strlen(str: *char): int
 fun main() {
   const str: *char = "Hello World!"
   const len = strlen(str)

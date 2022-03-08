@@ -239,13 +239,14 @@ public:
   }
   Variable *gen_variable(char *name, bool constant) {
     LLVMValueRef str = LLVMConstString(chars, length, true);
-    LLVMValueRef zeros[2] = {
-        LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false),
-        LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false)};
     LLVMValueRef glob =
         LLVMAddGlobal(curr_module, get_array_type()->llvm_type(), name);
     LLVMSetInitializer(glob, str);
     LLVMSetGlobalConstant(glob, constant);
+    LLVMValueRef zeros[2] = {
+        LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false),
+        LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false)};
+    // cast [ ... x i8 ] to i8*
     LLVMValueRef cast =
         LLVMConstGEP2(get_array_type()->llvm_type(), glob, zeros, 2);
     return new ConstVariable(cast, glob);
@@ -258,29 +259,29 @@ LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
   if (floating)
     switch (op) {
     case '+':
-      return LLVMBuildFAdd(curr_builder, L, R, "faddtmp");
+      return LLVMBuildFAdd(curr_builder, L, R, "");
     case '-':
-      return LLVMBuildFSub(curr_builder, L, R, "fsubtmp");
+      return LLVMBuildFSub(curr_builder, L, R, "");
     case '*':
-      return LLVMBuildFMul(curr_builder, L, R, "fmultmp");
+      return LLVMBuildFMul(curr_builder, L, R, "");
     case T_LAND:
     case '&':
-      return LLVMBuildAnd(curr_builder, L, R, "fandtmp");
+      return LLVMBuildAnd(curr_builder, L, R, "");
     case T_LOR:
     case '|':
-      return LLVMBuildOr(curr_builder, L, R, "fortmp");
+      return LLVMBuildOr(curr_builder, L, R, "");
     case '<':
-      return LLVMBuildFCmp(curr_builder, LLVMRealULT, L, R, "fcmptmp");
+      return LLVMBuildFCmp(curr_builder, LLVMRealULT, L, R, "");
     case '>':
-      return LLVMBuildFCmp(curr_builder, LLVMRealUGT, L, R, "fcmptmp");
+      return LLVMBuildFCmp(curr_builder, LLVMRealUGT, L, R, "");
     case T_LEQ:
-      return LLVMBuildFCmp(curr_builder, LLVMRealULE, L, R, "icmptmp");
+      return LLVMBuildFCmp(curr_builder, LLVMRealULE, L, R, "");
     case T_GEQ:
-      return LLVMBuildFCmp(curr_builder, LLVMRealUGE, L, R, "icmptmp");
+      return LLVMBuildFCmp(curr_builder, LLVMRealUGE, L, R, "");
     case T_EQEQ:
-      return LLVMBuildFCmp(curr_builder, LLVMRealUEQ, L, R, "icmptmp");
+      return LLVMBuildFCmp(curr_builder, LLVMRealUEQ, L, R, "");
     case T_NEQ:
-      return LLVMBuildFCmp(curr_builder, LLVMRealUNE, L, R, "icmptmp");
+      return LLVMBuildFCmp(curr_builder, LLVMRealUNE, L, R, "");
     default:
       fprintf(stderr, "Error: invalid float_float binary operator '%c'", op);
       exit(1);
@@ -289,35 +290,33 @@ LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
     bool is_signed = lhs_nt->is_signed && rhs_nt->is_signed;
     switch (op) {
     case '+':
-      return LLVMBuildAdd(curr_builder, L, R, "iaddtmp");
+      return LLVMBuildAdd(curr_builder, L, R, "");
     case '-':
-      return LLVMBuildSub(curr_builder, L, R, "isubtmp");
+      return LLVMBuildSub(curr_builder, L, R, "");
     case '*':
-      return LLVMBuildMul(curr_builder, L, R, "imultmp");
+      return LLVMBuildMul(curr_builder, L, R, "");
     case T_LAND:
     case '&':
-      return LLVMBuildAnd(curr_builder, L, R, "fandtmp");
+      return LLVMBuildAnd(curr_builder, L, R, "");
     case T_LOR:
     case '|':
-      return LLVMBuildOr(curr_builder, L, R, "fortmp");
+      return LLVMBuildOr(curr_builder, L, R, "");
     case '<':
       return LLVMBuildICmp(curr_builder, is_signed ? LLVMIntSLT : LLVMIntULT, L,
-                           R, "icmptmp");
+                           R, "");
     case '>':
       return LLVMBuildICmp(curr_builder, is_signed ? LLVMIntSGT : LLVMIntUGT, L,
-                           R, "icmptmp");
+                           R, "");
     case T_LEQ:
       return LLVMBuildICmp(curr_builder, is_signed ? LLVMIntSLE : LLVMIntULE, L,
-                           R, "icmptmp");
+                           R, "");
     case T_GEQ:
       return LLVMBuildICmp(curr_builder, is_signed ? LLVMIntSGE : LLVMIntUGE, L,
-                           R, "icmptmp");
+                           R, "");
     case T_EQEQ:
-      return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntEQ, L, R,
-                           "icmptmp");
+      return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntEQ, L, R, "");
     case T_NEQ:
-      return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntNE, L, R,
-                           "icmptmp");
+      return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntNE, L, R, "");
     default:
       fprintf(stderr, "Error: invalid int_int binary operator '%c'", op);
       exit(1);
@@ -335,7 +334,7 @@ LLVMValueRef gen_ptr_num_binop(int op, LLVMValueRef ptr, LLVMValueRef num,
     num = LLVMBuildSub(
         curr_builder,
         LLVMConstInt((new NumType(32, false, false))->llvm_type(), 0, false),
-        num, "ptrmintmp");
+        num, "");
     /* falls through */
   case '+':
     return LLVMBuildGEP2(curr_builder, ptr_t->points_to->llvm_type(), ptr, &num,
@@ -538,11 +537,12 @@ class PropAccessExprAST : public ExprAST {
   ExprAST *source;
   StructType *source_type;
   unsigned int index;
+  char *key;
   Type *type;
 
 public:
   PropAccessExprAST(char *key, unsigned int key_len, ExprAST *source)
-      : source(source) {
+      : key(key), source(source) {
     source_type = dynamic_cast<StructType *>(
         dynamic_cast<PointerType *>(source->get_type())->get_points_to());
     index = source_type->get_index(key, key_len);
@@ -552,12 +552,11 @@ public:
   Type *get_type() { return type; }
 
   LLVMValueRef gen_val() {
-    return LLVMBuildLoad2(curr_builder, type->llvm_type(), gen_ptr(),
-                          "tmpload");
+    return LLVMBuildLoad2(curr_builder, type->llvm_type(), gen_ptr(), key);
   }
   LLVMValueRef gen_ptr() {
     return LLVMBuildStructGEP2(curr_builder, source_type->llvm_type(),
-                               source->gen_val(), index, "tmpgep");
+                               source->gen_val(), index, key);
   }
 };
 
@@ -566,13 +565,14 @@ public:
 class NewExprAST : public ExprAST {
   StructType *type;
   unsigned int *indexes;
+  char **keys;
   ExprAST **values;
   unsigned int key_count;
 
 public:
   NewExprAST(char *name, unsigned int name_len, char **keys,
              unsigned int *key_lens, ExprAST **values, unsigned int key_count)
-      : values(values), key_count(key_count) {
+      : values(values), keys(keys), key_count(key_count) {
     type = dynamic_cast<StructType *>(
         curr_named_structs[std::string(name, name_len)]);
     indexes = alloc_arr<unsigned int>(key_count);
@@ -596,11 +596,8 @@ public:
       LLVMValueRef llvm_indexes[2] = {
           LLVMConstInt(LLVMInt32Type(), 0, false),
           LLVMConstInt(LLVMInt32Type(), indexes[i], false)};
-
       LLVMValueRef set_ptr = LLVMBuildStructGEP2(
-          curr_builder, type->llvm_type(), ptr, indexes[i],
-          "tmpgep"); // LLVMBuildGEP2(curr_builder, type->llvm_type(), ptr,
-                     // llvm_indexes, key_count + 1, "tmpgep");
+          curr_builder, type->llvm_type(), ptr, indexes[i], "tmpgep");
       LLVMBuildStore(curr_builder, values[i]->gen_val(), set_ptr);
     }
     return ptr;
@@ -808,29 +805,29 @@ public:
     return func;
   }
 };
-/// ExternExprAST - Expression class for defining an extern.
-class ExternExprAST : public TopLevelAST {
+/// DeclareExprAST - Expression class for defining an declare.
+class DeclareExprAST : public TopLevelAST {
   LetExprAST *let = nullptr;
   PrototypeAST *prot = nullptr;
   Type *type;
 
 public:
-  ExternExprAST(LetExprAST *let) : let(let) {
+  DeclareExprAST(LetExprAST *let) : let(let) {
     type = let->get_type();
-    register_extern();
+    register_declare();
   }
-  ExternExprAST(PrototypeAST *prot) : prot(prot) {
+  DeclareExprAST(PrototypeAST *prot) : prot(prot) {
     type = prot->get_type();
-    register_extern();
+    register_declare();
   }
-  void register_extern() {
+  void register_declare() {
     if (FunctionType *fun_t = dynamic_cast<FunctionType *>(type))
       curr_named_var_types[std::string(prot->name, prot->name_len)] = fun_t;
     else
       curr_named_var_types[std::string(let->id, let->id_len)] = type;
   }
   void gen_toplevel() {
-    register_extern();
+    register_declare();
     if (let)
       let->gen_declare();
     else
@@ -846,13 +843,13 @@ class FunctionAST : public TopLevelAST {
 public:
   FunctionAST(PrototypeAST *proto, ExprAST *body) {
     if (proto->return_type == nullptr)
-      proto->return_type = body->get_type();
+      proto->type->return_type = proto->return_type = body->get_type();
     this->proto = proto;
     this->body = body;
   }
 
   void gen_toplevel() {
-    // First, check for an existing function from a previous 'extern'
+    // First, check for an existing function from a previous 'declare'
     // declaration.
     LLVMValueRef func = LLVMGetNamedFunction(curr_module, proto->name);
 

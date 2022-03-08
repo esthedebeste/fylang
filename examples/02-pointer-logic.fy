@@ -1,4 +1,4 @@
-extern fun puts(str: *char): void
+declare fun puts(str: *char): void
 fun main() {
     let str = "hello world!"
     # Instead of ptr[offset], ptr+offset is used.
@@ -8,4 +8,3 @@ fun main() {
     puts(str)
     0i
 }
-

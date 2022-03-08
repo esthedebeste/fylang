@@ -1,5 +1,6 @@
 #pragma once
 #include <ctype.h>
+#include <libgen.h>
 #include <malloc.h>
 #include <map>
 #include <memory>
@@ -14,29 +15,33 @@ extern "C" {
 #include "llvm-c/Transforms/PassBuilder.h"
 }
 
-const int T_EOF = -1;        // end of file
-const int T_IDENTIFIER = -2; // foo
-const int T_NUMBER = -3;     // 123
-const int T_STRING = -4;     // "foo"
-const int T_CHAR = -5;       // 'a'
-const int T_BOOL = -6;       // true
-const int T_IF = -7;         // if
-const int T_ELSE = -8;       // else
-const int T_WHILE = -9;      // while
-const int T_RETURN = -10;    // return
-const int T_FUNCTION = -11;  // fun
-const int T_EXTERN = -12;    // extern
-const int T_LET = -13;       // let
-const int T_CONST = -14;     // const
-const int T_STRUCT = -15;    // struct
-const int T_NEW = -16;       // new
-const int T_EQEQ = -17;      // ==
-const int T_LEQ = -18;       // <=
-const int T_GEQ = -19;       // >=
-const int T_NEQ = -20;       // !=
-const int T_LOR = -21;       // ||
-const int T_LAND = -22;      // &&
+char *std_dir;
 
+enum Tokens : const int {
+  T_EOF = -1,        // end of file
+  T_IDENTIFIER = -2, // foo
+  T_NUMBER = -3,     // 123
+  T_STRING = -4,     // "foo"
+  T_CHAR = -5,       // 'a'
+  T_BOOL = -6,       // true
+  T_IF = -7,         // if
+  T_ELSE = -8,       // else
+  T_WHILE = -9,      // while
+  T_RETURN = -10,    // return
+  T_FUNCTION = -11,  // fun
+  T_DECLARE = -12,   // declare
+  T_LET = -13,       // let
+  T_CONST = -14,     // const
+  T_STRUCT = -15,    // struct
+  T_NEW = -16,       // new
+  T_EQEQ = -17,      // ==
+  T_LEQ = -18,       // <=
+  T_GEQ = -19,       // >=
+  T_NEQ = -20,       // !=
+  T_LOR = -21,       // ||
+  T_LAND = -22,      // &&
+  T_INCLUDE = -23    // include
+};
 static LLVMContextRef curr_ctx;
 static LLVMBuilderRef curr_builder;
 static LLVMModuleRef curr_module;

@@ -37,3 +37,11 @@ inline char *alloc_c(unsigned int amount) { return (char *)malloc(amount); }
 inline char *realloc_c(char *ptr, unsigned int amount) {
   return (char *)realloc(ptr, amount);
 }
+
+char *clone_str(char *str) {
+  unsigned int len = strlen(str);
+  char *cpy = alloc_c(len + 1);
+  for (unsigned int i = 0; i < len; i++)
+    cpy[i] = str[i];
+  return cpy;
+}

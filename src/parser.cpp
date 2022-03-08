@@ -355,11 +355,8 @@ static ExprAST *parse_bin_op_rhs(int expr_prec, ExprAST *LHS) {
     // If BinOp binds less tightly with RHS than the operator after RHS, let
     // the pending operator take RHS as its LHS.
     int next_prec = get_token_precedence();
-    if (t_prec < next_prec) {
+    if (t_prec < next_prec)
       RHS = parse_bin_op_rhs(t_prec + 1, RHS);
-      if (!RHS)
-        return nullptr;
-    }
 
     // Merge LHS/RHS.
     LHS = new BinaryExprAST(bin_op, LHS, RHS);
@@ -423,18 +420,18 @@ static FunctionAST *parse_definition() {
   auto e = parse_expr();
   return new FunctionAST(proto, e);
 }
-/// external
+/// declareal
 ///   ::= 'fun' prototype
 ///   ::= 'let' identifier ':' type
-static ExternExprAST *parse_extern() {
-  eat(T_EXTERN, (char *)"extern"); // eat extern.
+static DeclareExprAST *parse_declare() {
+  eat(T_DECLARE, (char *)"declare"); // eat declare.
   if (curr_token == T_FUNCTION) {
     get_next_token();
     PrototypeAST *proto = parse_prototype(new NumType(32, false, true));
-    return new ExternExprAST(proto);
+    return new DeclareExprAST(proto);
   } else if (curr_token == T_CONST) {
     LetExprAST *let = parse_let_expr();
-    return new ExternExprAST(let);
+    return new DeclareExprAST(let);
   } else
     eat(0, (char *)"fun' or 'const");
   return nullptr;
@@ -475,4 +472,18 @@ static StructAST *parse_struct() {
   key_types = realloc_arr<Type *>(key_types, key_count);
   return new StructAST(struct_name, struct_name_len, key_names, key_name_lens,
                        key_types, key_count);
+}
+
+/// include ::= 'include' string_expr
+static char *parse_include() {
+  eat(T_INCLUDE, (char *)"include");
+  char *path = string_value;
+  if (curr_token != T_STRING) {
+    fprintf(
+        stderr,
+        "Error: Unexpected token after 'include': '%c' (%d), expected string",
+        curr_token, curr_token);
+    exit(1);
+  }
+  return path;
 }

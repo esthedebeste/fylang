@@ -3,40 +3,34 @@
 
 #include "parser.cpp"
 static void handle_definition() {
-  if (auto ast = parse_definition()) {
-    fprintf(stderr, "Parsed a function definition.\n");
-    ast->gen_toplevel();
-  } else
-    // Skip token for error recovery.
-    get_next_token();
+  auto ast = parse_definition();
+  fprintf(stderr, "Parsed a function definition.\n");
+  ast->gen_toplevel();
 }
 
-static void handle_extern() {
-  if (auto ast = parse_extern()) {
-    fprintf(stderr, "Parsed an extern\n");
-    ast->gen_toplevel();
-  } else
-    // Skip token for error recovery.
-    get_next_token();
+static void handle_declare() {
+  auto ast = parse_declare();
+  fprintf(stderr, "Parsed an declare\n");
+  ast->gen_toplevel();
 }
 static void handle_global_let() {
-  if (auto ast = parse_let_expr(true)) {
-    fprintf(stderr, "Parsed a global variable\n");
-    ast->gen_toplevel();
-  } else
-    // Skip token for error recovery.
-    get_next_token();
+  auto ast = parse_let_expr(true);
+  fprintf(stderr, "Parsed a global variable\n");
+  ast->gen_toplevel();
 }
 static void handle_global_struct() {
-  if (auto ast = parse_struct()) {
-    fprintf(stderr, "Parsed a struct definition\n");
-    ast->gen_toplevel();
-  } else
-    // Skip token for error recovery.
-    get_next_token();
+  auto ast = parse_struct();
+  fprintf(stderr, "Parsed a struct definition\n");
+  ast->gen_toplevel();
+}
+static void handle_global_include() {
+  char *file_name = parse_include();
+  fprintf(stderr, "Parsed an include\n");
+  CharReader *curr_file = queue[queue_len - 1];
+  add_file_to_queue(curr_file->file_path, file_name);
+  get_next_token();
 }
 
-/// top ::= definition | external | expression | ';'
 static void main_loop() {
   get_next_token();
   while (1) {
@@ -49,8 +43,8 @@ static void main_loop() {
     case T_FUNCTION:
       handle_definition();
       break;
-    case T_EXTERN:
-      handle_extern();
+    case T_DECLARE:
+      handle_declare();
       break;
     case T_CONST:
     case T_LET:
@@ -58,6 +52,9 @@ static void main_loop() {
       break;
     case T_STRUCT:
       handle_global_struct();
+      break;
+    case T_INCLUDE:
+      handle_global_include();
       break;
     default:
       fprintf(stderr, "Unexpected token '%c' (%d) at top-level", curr_token,
@@ -74,6 +71,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  std_dir = get_relative_path(argv[0], (char *)"../lib");
   // host machine triple
   char *target_triple = LLVMGetDefaultTargetTriple();
   LLVMTargetRef target;
@@ -99,11 +97,7 @@ int main(int argc, char **argv) {
   curr_ctx = LLVMGetGlobalContext();
 
   // open .fy file
-  current_file = fopen(argv[1], "r");
-  if (!current_file) {
-    fprintf(stderr, "File \'%s\' doesn't exist", argv[1]);
-    return 1;
-  }
+  add_file_to_queue((char *)".", argv[1]);
   // parse and compile everything into LLVM IR
   main_loop();
   // export LLVM IR into other file

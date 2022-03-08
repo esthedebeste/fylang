@@ -19,6 +19,8 @@ echo "
  - Linked $name.ll,
  - Running $name" &&
 ./$name "$@" 
+exitc=$?
 echo "
- - Executed examples/$name.fy with exit code $?"
+ - Executed examples/$name.fy with exit code $exitc"
 cd ..
+exit $exitc

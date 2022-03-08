@@ -1,21 +1,6 @@
 #pragma once
-
-FILE *current_file;
-static int next_char() {
-  static char buf[1024 * 4];
-  static char *p = buf;
-  static int n = 0;
-  if (n == 0) {
-    n = fread(buf, 1, sizeof(buf), current_file);
-    p = buf;
-  }
-  char ret = n-- > 0 ? *p++ : EOF;
-  if (ret == EOF)
-    fputs("[EOF]", stderr);
-  else
-    fputc(ret, stderr);
-  return ret;
-}
+#include "consts.cpp"
+#include "reader.cpp"
 
 static unsigned int identifier_string_length;
 static char
@@ -100,8 +85,8 @@ static int next_token() {
     read_str(&is_alphaish, &identifier_string, &identifier_string_length);
     if (streq(identifier_string, identifier_string_length, "fun", 3))
       return T_FUNCTION;
-    else if (streq(identifier_string, identifier_string_length, "extern", 6))
-      return T_EXTERN;
+    else if (streq(identifier_string, identifier_string_length, "declare", 7))
+      return T_DECLARE;
     else if (streq(identifier_string, identifier_string_length, "if", 2))
       return T_IF;
     else if (streq(identifier_string, identifier_string_length, "else", 4))
@@ -116,6 +101,8 @@ static int next_token() {
       return T_STRUCT;
     else if (streq(identifier_string, identifier_string_length, "new", 3))
       return T_NEW;
+    else if (streq(identifier_string, identifier_string_length, "include", 7))
+      return T_INCLUDE;
     return T_IDENTIFIER;
   } else if (isdigit(last_char)) {
     // Number: [0-9]+.?[0-9]*
