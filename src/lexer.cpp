@@ -1,6 +1,6 @@
 #pragma once
-#include "consts.cpp"
 #include "reader.cpp"
+#include "utils.cpp"
 
 static unsigned int identifier_string_length;
 static char

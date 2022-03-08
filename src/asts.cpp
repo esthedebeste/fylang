@@ -8,6 +8,10 @@ static std::map<std::string, Variable *> curr_named_variables;
 static std::map<std::string, Type *> curr_named_var_types;
 static std::map<std::string, StructType *> curr_named_structs;
 
+class Assignable {
+public:
+  virtual LLVMValueRef gen_assign_ptr() = 0;
+};
 class TopLevelAST {
 public:
   virtual void gen_toplevel() = 0;
@@ -98,7 +102,7 @@ public:
 };
 
 /// VariableExprAST - Expression class for referencing a variable, like "a".
-class VariableExprAST : public ExprAST {
+class VariableExprAST : public ExprAST, public Assignable {
   char *name;
   unsigned int name_len;
   Type *type;
@@ -130,6 +134,7 @@ public:
     }
     return v->gen_ptr();
   }
+  LLVMValueRef gen_assign_ptr() { return gen_ptr(); }
 };
 
 /// LetExprAST - Expression class for creating a variable, like "let a = 3".
@@ -264,6 +269,10 @@ LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
       return LLVMBuildFSub(curr_builder, L, R, "");
     case '*':
       return LLVMBuildFMul(curr_builder, L, R, "");
+    case '/':
+      return LLVMBuildFDiv(curr_builder, L, R, "");
+    case '%':
+      return LLVMBuildFRem(curr_builder, L, R, "");
     case T_LAND:
     case '&':
       return LLVMBuildAnd(curr_builder, L, R, "");
@@ -295,6 +304,12 @@ LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
       return LLVMBuildSub(curr_builder, L, R, "");
     case '*':
       return LLVMBuildMul(curr_builder, L, R, "");
+    case '/':
+      return is_signed ? LLVMBuildSDiv(curr_builder, L, R, "")
+                       : LLVMBuildUDiv(curr_builder, L, R, "");
+    case '%':
+      return is_signed ? LLVMBuildSRem(curr_builder, L, R, "")
+                       : LLVMBuildURem(curr_builder, L, R, "");
     case T_LAND:
     case '&':
       return LLVMBuildAnd(curr_builder, L, R, "");
@@ -361,8 +376,7 @@ public:
 
     if (op == '=') {
       // if the LHS is a variable, ptr is implied.
-      if (dynamic_cast<VariableExprAST *>(LHS) ||
-          lhs_t->eq(new PointerType(rhs_t)))
+      if (dynamic_cast<Assignable *>(LHS) || lhs_t->eq(new PointerType(rhs_t)))
         type = rhs_t;
       else {
         fprintf(stderr, "Invalid variable assignment, unequal types.");
@@ -389,10 +403,10 @@ public:
 
   LLVMValueRef gen_assign(bool ptr) {
     LLVMValueRef set_to;
-    if (VariableExprAST *left_var = dynamic_cast<VariableExprAST *>(LHS))
+    if (Assignable *left_var = dynamic_cast<Assignable *>(LHS))
       // for 'a = 3'. If you want to override this behavior (and set the pointer
       // referenced in a) use 'a+0 = 3'
-      set_to = left_var->gen_ptr();
+      set_to = left_var->gen_assign_ptr();
     else if (LHS->get_type()->type_type() == TypeType::Pointer)
       set_to = LHS->gen_val();
     else
@@ -532,8 +546,43 @@ public:
   }
 };
 
+/// IndexExprAST - Expression class for accessing indexes (a[0]).
+class IndexExprAST : public ExprAST, public Assignable {
+  ExprAST *value;
+  ExprAST *index;
+  Type *type;
+
+public:
+  IndexExprAST(ExprAST *value, ExprAST *index) : value(value), index(index) {
+    Type *base_type = value->get_type();
+    if (PointerType *p_type = dynamic_cast<PointerType *>(base_type))
+      type = p_type->get_points_to();
+    else if (ArrayType *arr_type = dynamic_cast<ArrayType *>(base_type))
+      type = arr_type->get_elem_type();
+    else {
+      fprintf(stderr,
+              "Invalid index, type not arrayish.\n"
+              "Expected: array | pointer \nGot: %s",
+              tt_to_str(base_type->type_type()));
+      exit(1);
+    }
+  }
+
+  Type *get_type() { return type; }
+
+  LLVMValueRef gen_val() {
+    return LLVMBuildLoad2(curr_builder, type->llvm_type(), gen_ptr(), "");
+  }
+  LLVMValueRef gen_ptr() {
+    LLVMValueRef index_v = index->gen_val();
+    return LLVMBuildGEP2(curr_builder, type->llvm_type(), value->gen_val(),
+                         &index_v, 1, "indextmp");
+  }
+  LLVMValueRef gen_assign_ptr() { return gen_ptr(); }
+};
+
 /// PropAccessExprAST - Expression class for accessing properties (a.size).
-class PropAccessExprAST : public ExprAST {
+class PropAccessExprAST : public ExprAST, public Assignable {
   ExprAST *source;
   StructType *source_type;
   unsigned int index;
@@ -558,6 +607,7 @@ public:
     return LLVMBuildStructGEP2(curr_builder, source_type->llvm_type(),
                                source->gen_val(), index, key);
   }
+  LLVMValueRef gen_assign_ptr() { return gen_ptr(); }
 };
 
 /// NewExprAST - Expression class for creating an instance of a struct (new

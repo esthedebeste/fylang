@@ -1,5 +1,5 @@
-#include "utils.cpp"
 #pragma once
+#include "utils.cpp"
 
 static LLVMTypeRef void_type =
     LLVMStructCreateNamed(LLVMGetGlobalContext(), "void");

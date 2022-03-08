@@ -2,6 +2,7 @@
 #include "asts.cpp"
 #include "lexer.cpp"
 #include "types.cpp"
+#include "utils.cpp"
 static int curr_token;
 static int get_next_token() { return curr_token = next_token(); }
 static int eat(int expected_token, char *exp_name = nullptr) {
@@ -311,6 +312,14 @@ static ExprAST *parse_postfix() {
       }
       eat(')');
       prev = new CallExprAST(prev, args, args_len);
+      break;
+    }
+    case '[': {
+      // indexing
+      eat('[');
+      ExprAST *index = parse_expr();
+      eat(']');
+      prev = new IndexExprAST(prev, index);
       break;
     }
     }

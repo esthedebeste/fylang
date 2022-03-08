@@ -1,5 +1,5 @@
 #pragma once
-#include "consts.cpp"
+#include "utils.cpp"
 class CharReader {
 #define BUF_SIZE 4096
   char buf[BUF_SIZE];

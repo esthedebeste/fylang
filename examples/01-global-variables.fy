@@ -1,6 +1,7 @@
-declare fun puts(str: *char): void
+include "std/std"
+
 const str = "Hello World!\n"
 fun main() {
-    puts(str)
-    0i
+	eputs(str)
+	0i
 }
