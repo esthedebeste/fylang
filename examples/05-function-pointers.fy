@@ -1,9 +1,10 @@
 include "std/std"
+include "c/string"
 
 // in arguments, functions can be annotated as
 // `*fun(arg_type1, arg_type2, ...): return_type`
 fun put_filtered(str: *char, predicate: *fun(char): bool) {
-	const len = strlen(str)
+	const len = strlen(str) as int32
 	let i = 0i
 	while(i < len) {
 		// Access string indexes with *(ptr+offset)

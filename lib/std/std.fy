@@ -1,4 +1,4 @@
-include "c-std.fy"
+include "c/stdio.fy"
 include "cpp-implemented-std.fy"
 
 // eputc - takes a char and prints it to stderr

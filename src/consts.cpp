@@ -40,7 +40,11 @@ enum Tokens : const int {
   T_NEQ = -20,       // !=
   T_LOR = -21,       // ||
   T_LAND = -22,      // &&
-  T_INCLUDE = -23    // include
+  T_INCLUDE = -23,   // include
+  T_TYPE = -24,      // type
+  T_UNSIGNED = -25,  // unsigned
+  T_SIGNED = -26,    // signed
+  T_AS = -27,        // as
 };
 static LLVMContextRef curr_ctx;
 static LLVMBuilderRef curr_builder;

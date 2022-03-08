@@ -1,15 +1,15 @@
-include "std/c-std"
+include "c/stdio"
 
 struct String {
 	pointer: *char,
 	length: unsigned int
 }
-#// Iterates over all characters in `str`, writing them all to stdout individually.
+// Iterates over all characters in `str`, writing them all to stdout individually.
 fun print_to_stdout(str: *String) {
 	let i = 0i
 	while(i < str.length) { 
-		// Access string indexes with *(ptr+offset)
-		putchar(*(str.pointer + i))
+		// Access string indexes with ptr[offset]
+		putchar(str.pointer[i])
 		i = i + 1i
 	} else 0i
 }

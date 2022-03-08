@@ -5,6 +5,7 @@ class CharReader {
   char buf[BUF_SIZE];
   char *p;
   unsigned int n;
+  bool ended;
 
 public:
   char *file_path;
@@ -14,20 +15,27 @@ public:
     n = 0;
   }
   char next_char() {
+    if (ended) {
+      fputs("[EOF]", stderr);
+      return EOF;
+    }
     if (n == 0) {
       n = fread(buf, 1, sizeof(buf), file);
       p = buf;
     }
     char ret = n-- > 0 ? *p++ : EOF;
-    if (ret == EOF)
-      fputs("[EOF]", stderr);
-    else
+    if (ret == EOF) {
+      ended = true;
+      return ' ';
+    } else
       fputc(ret, stderr);
     return ret;
   }
 };
 
-CharReader **queue;
+char **visited_paths = new char *[1];
+unsigned int visited_paths_len;
+CharReader **queue = new CharReader *[1];
 unsigned int queue_len = 0;
 static int next_char() {
   char ret = EOF;
@@ -47,7 +55,7 @@ char *join(char *base, char *rel) {
   return buf;
 }
 char *get_relative_path(char *base_path, char *relative_path) {
-  return join(dirname(clone_str(base_path)), relative_path);
+  return join(dirname(strdup(base_path)), relative_path);
 }
 
 char *add_fy_ext(char *str) {
@@ -80,9 +88,20 @@ CharReader *get_file(char *base_path, char *relative_path) {
 
 static void add_file_to_queue(char *base_path, char *relative_path) {
   static unsigned int queue_allocated = 1;
-  if (queue_len == queue_allocated)
+  if (queue_len >= queue_allocated) {
     queue_allocated *= 2;
-  queue = realloc_arr<CharReader *>(queue, queue_allocated);
-  queue[queue_len] = get_file(base_path, relative_path);
-  queue_len++;
+    queue = realloc_arr<CharReader *>(queue, queue_allocated);
+  }
+  CharReader *file = get_file(base_path, relative_path);
+  char *path = realpath(file->file_path, nullptr);
+  for (unsigned int i = 0; i < visited_paths_len; i++)
+    if (streq(visited_paths[i], path))
+      return; // similar to C #pragma once
+  static unsigned int visited_allocated = 1;
+  if (visited_paths_len >= visited_allocated) {
+    visited_allocated *= 2;
+    visited_paths = realloc_arr<char *>(visited_paths, visited_allocated);
+  }
+  visited_paths[visited_paths_len++] = path;
+  queue[queue_len++] = file;
 }

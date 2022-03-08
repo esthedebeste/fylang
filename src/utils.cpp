@@ -1,7 +1,7 @@
 #pragma once
 #include "consts.cpp"
-static bool streq(const char *a, const unsigned int alen, const char *b,
-                  const unsigned int blen) {
+static bool streql(const char *a, const unsigned int alen, const char *b,
+                   const unsigned int blen) {
   if (alen != blen)
     return false;
   for (unsigned int i = 0; i < alen; i++)
@@ -9,6 +9,7 @@ static bool streq(const char *a, const unsigned int alen, const char *b,
       return false;
   return true;
 }
+static bool streq(const char *a, const char *b) { return strcmp(a, b) == 0; }
 // assumes that num_str actually has that base
 static unsigned int parse_pos_int(char *num_str, unsigned int num_str_len,
                                   unsigned int base = 10) {
@@ -36,12 +37,4 @@ inline Elem *realloc_arr(Elem *ptr, unsigned int amount) {
 inline char *alloc_c(unsigned int amount) { return (char *)malloc(amount); }
 inline char *realloc_c(char *ptr, unsigned int amount) {
   return (char *)realloc(ptr, amount);
-}
-
-char *clone_str(char *str) {
-  unsigned int len = strlen(str);
-  char *cpy = alloc_c(len + 1);
-  for (unsigned int i = 0; i < len; i++)
-    cpy[i] = str[i];
-  return cpy;
 }

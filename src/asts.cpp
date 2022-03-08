@@ -6,7 +6,7 @@
 // Includes function arguments
 static std::map<std::string, Variable *> curr_named_variables;
 static std::map<std::string, Type *> curr_named_var_types;
-static std::map<std::string, StructType *> curr_named_structs;
+static std::map<std::string, Type *> curr_named_types;
 
 class Assignable {
 public:
@@ -99,6 +99,21 @@ public:
     LLVMSetInitializer(glob, val);
     return new BasicLoadVariable(glob, type);
   }
+};
+
+class CastExprAST : public ExprAST {
+  ExprAST *value;
+  Type *cast_from;
+  Type *cast_to;
+
+public:
+  CastExprAST(ExprAST *value, Type *cast_to) : value(value), cast_to(cast_to) {
+    cast_from = value->get_type();
+  }
+  LLVMValueRef gen_val() {
+    return cast_from->cast_to(cast_to, value->gen_val());
+  }
+  Type *get_type() { return cast_to; }
 };
 
 /// VariableExprAST - Expression class for referencing a variable, like "a".
@@ -404,8 +419,8 @@ public:
   LLVMValueRef gen_assign(bool ptr) {
     LLVMValueRef set_to;
     if (Assignable *left_var = dynamic_cast<Assignable *>(LHS))
-      // for 'a = 3'. If you want to override this behavior (and set the pointer
-      // referenced in a) use 'a+0 = 3'
+      // for 'a = 3'. If you want to override this behavior (and set the
+      // pointer referenced in a) use 'a+0 = 3'
       set_to = left_var->gen_assign_ptr();
     else if (LHS->get_type()->type_type() == TypeType::Pointer)
       set_to = LHS->gen_val();
@@ -620,15 +635,6 @@ class NewExprAST : public ExprAST {
   unsigned int key_count;
 
 public:
-  NewExprAST(char *name, unsigned int name_len, char **keys,
-             unsigned int *key_lens, ExprAST **values, unsigned int key_count)
-      : values(values), keys(keys), key_count(key_count) {
-    type = dynamic_cast<StructType *>(
-        curr_named_structs[std::string(name, name_len)]);
-    indexes = alloc_arr<unsigned int>(key_count);
-    for (unsigned int i = 0; i < key_count; i++)
-      indexes[i] = type->get_index(keys[i], key_lens[i]);
-  }
   NewExprAST(StructType *type, char **keys, unsigned int *key_lens,
              ExprAST **values, unsigned int key_count)
       : type(type), values(values), key_count(key_count) {
@@ -806,8 +812,8 @@ public:
   }
 };
 /// PrototypeAST - This class represents the "prototype" for a function,
-/// which captures its name, and its argument names (thus implicitly the number
-/// of arguments the function takes).
+/// which captures its name, and its argument names (thus implicitly the
+/// number of arguments the function takes).
 class PrototypeAST {
 public:
   char **arg_names;
@@ -947,7 +953,18 @@ public:
       : name(name), name_len(name_len), names(names),
         name_lengths(name_lengths), types(types), count(count) {}
   void gen_toplevel() {
-    curr_named_structs[std::string(name, name_len)] =
+    curr_named_types[std::string(name, name_len)] =
         new StructType(name, name_len, names, name_lengths, types, count);
   }
+};
+
+class TypeDefAST : public TopLevelAST {
+  char *name;
+  unsigned int name_len;
+  Type *type;
+
+public:
+  TypeDefAST(char *name, unsigned int name_len, Type *type)
+      : name(name), name_len(name_len), type(type) {}
+  void gen_toplevel() { curr_named_types[std::string(name, name_len)] = type; }
 };

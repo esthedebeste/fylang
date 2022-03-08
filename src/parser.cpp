@@ -47,49 +47,55 @@ static Type *parse_function_type() {
   return new FunctionType(return_type, arg_types, args_len);
 }
 
-static Type *parse_type() {
-  bool is_signed = true;
-  while (1) {
-    char *id = identifier_string;
-    unsigned int id_len = identifier_string_length;
-    eat(T_IDENTIFIER, (char *)"identifier");
-    if (streq(id, id_len, "unsigned", 8))
-      is_signed = false;
-    // starts with "int"
-    else if (id_len >= 3 && streq(id, 3, "int", 3))
-      if (id_len > 3)
-        return new NumType(id + 3, id_len - 3, false, is_signed);
-      else
-        return new NumType(32, false, is_signed);
-    // starts with "float"
-    else if (id_len >= 5 && streq(id, 5, "float", 5))
-      if (!is_signed)
-        error("unsigned floats don't exist");
-      else if (id_len > 5)
-        return new NumType(id + 5, id_len - 5, true, true);
-      else
-        return new NumType(32, true, true);
-    else if (streq(id, id_len, "double", 6))
-      return new NumType(64, true, true);
-    else if (streq(id, id_len, "byte", 4) || streq(id, id_len, "char", 4))
-      return new NumType(8, false, is_signed);
-    else if (streq(id, id_len, "long", 4))
-      return new NumType(64, false, is_signed);
-    else if (streq(id, id_len, "bool", 4))
-      return new NumType(1, false, false);
-    else if (streq(id, id_len, "void", 4))
-      return new VoidType();
-    else if (curr_named_structs[std::string(id, id_len)])
-      return curr_named_structs[std::string(id, id_len)];
+static Type *parse_num_type() {
+  char *id = identifier_string;
+  unsigned int id_len = identifier_string_length;
+  eat(T_IDENTIFIER, (char *)"identifier");
+  // starts with "int"
+  if (id_len >= 3 && streql(id, 3, "int", 3))
+    if (id_len > 3)
+      return new NumType(id + 3, id_len - 3, false, true);
+    else
+      return new NumType(32, false, true);
+  // starts with "float"
+  else if (id_len >= 5 && streql(id, 5, "float", 5))
+    if (id_len > 5)
+      return new NumType(id + 5, id_len - 5, true, true);
+    else
+      return new NumType(32, true, true);
+  else if (streql(id, id_len, "void", 4))
+    return new VoidType();
+  else if (curr_named_types[std::string(id, id_len)])
+    return curr_named_types[std::string(id, id_len)];
+  else {
+    fprintf(stderr, "Error: invalid type '%s'", id);
+    exit(1);
   }
+}
+
+static TypeDefAST *parse_type_definition() {
+  eat(T_TYPE, (char *)"type");
+  char *name = identifier_string;
+  unsigned int name_len = identifier_string_length;
+  eat(T_IDENTIFIER, (char *)"identifier");
+  eat('=');
+  Type *t = parse_type_unary();
+  return new TypeDefAST(name, name_len, t);
+}
+static ExprAST *parse_number_expr() {
+  // TODO: parse number base (hex 0x, binary 0b, octal 0o)
+  auto result =
+      new NumberExprAST(num_value, num_length, num_type, num_has_dot, 10);
+  get_next_token(); // consume the number
+  return result;
 }
 
 static Type *parse_type_unary() {
   if (curr_token == T_FUNCTION)
     return parse_function_type();
   // If the current token is not a unary type operator, just parse type
-  if (!(curr_token == '&' || curr_token == '*'))
-    return parse_type();
+  if (!(curr_token == '&' || curr_token == '*' || curr_token == T_UNSIGNED))
+    return parse_num_type();
   // If this is a unary operator, read it.
   int opc = curr_token;
   get_next_token();
@@ -101,16 +107,24 @@ static Type *parse_type_unary() {
         return ptr->get_points_to();
       else
         error("use of & type operator without pointer on right-hand side");
+    } else if (opc == T_UNSIGNED) {
+      if (NumType *num = dynamic_cast<NumType *>(operand))
+        if (num->is_floating)
+          error("unsigned floats don't exist");
+        else
+          return new NumType(num->bits, false, false);
+      else
+        error("use of `unsigned` type operator without number on right-hand "
+              "side");
+    } else if (opc == T_SIGNED) {
+      if (NumType *num = dynamic_cast<NumType *>(operand))
+        return new NumType(num->bits, num->is_floating, true);
+      else
+        error(
+            "use of `signed` type operator without number on right-hand side");
     }
   }
   return nullptr;
-}
-static ExprAST *parse_number_expr() {
-  // TODO: parse number base (hex 0x, binary 0b, octal 0o)
-  auto result =
-      new NumberExprAST(num_value, num_length, num_type, num_has_dot, 10);
-  get_next_token(); // consume the number
-  return result;
 }
 static ExprAST *parse_char_expr() {
   auto result = new CharExprAST(char_value);
@@ -165,7 +179,7 @@ static ExprAST *parse_while_expr() {
 /// newexpr ::= 'new' type '{' (identifier '=' expr ',')* '}'
 static ExprAST *parse_new_expr() {
   eat(T_NEW, (char *)"new");
-  auto type = dynamic_cast<StructType *>(parse_type());
+  auto type = dynamic_cast<StructType *>(parse_num_type());
   if (!type)
     error("new with non-struct value");
   char **keys = alloc_arr<char *>(128);
@@ -322,6 +336,13 @@ static ExprAST *parse_postfix() {
       prev = new IndexExprAST(prev, index);
       break;
     }
+    case T_AS: {
+      // cast
+      eat(T_AS);
+      Type *cast_to = parse_type_unary();
+      prev = new CastExprAST(prev, cast_to);
+      break;
+    }
     }
 }
 /// unary
@@ -429,7 +450,7 @@ static FunctionAST *parse_definition() {
   auto e = parse_expr();
   return new FunctionAST(proto, e);
 }
-/// declareal
+/// declare
 ///   ::= 'fun' prototype
 ///   ::= 'let' identifier ':' type
 static DeclareExprAST *parse_declare() {

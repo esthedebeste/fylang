@@ -9,7 +9,7 @@ static void handle_definition() {
 
 static void handle_declare() {
   auto ast = parse_declare();
-  fprintf(stderr, "Parsed an declare\n");
+  fprintf(stderr, "Parsed a declare\n");
   ast->gen_toplevel();
 }
 static void handle_global_let() {
@@ -20,6 +20,11 @@ static void handle_global_let() {
 static void handle_global_struct() {
   auto ast = parse_struct();
   fprintf(stderr, "Parsed a struct definition\n");
+  ast->gen_toplevel();
+}
+static void handle_global_type() {
+  auto ast = parse_type_definition();
+  fprintf(stderr, "Parsed a type definition\n");
   ast->gen_toplevel();
 }
 static void handle_global_include() {
@@ -54,6 +59,9 @@ static void main_loop() {
       break;
     case T_INCLUDE:
       handle_global_include();
+      break;
+    case T_TYPE:
+      handle_global_type();
       break;
     default:
       fprintf(stderr, "Unexpected token '%c' (%d) at top-level", curr_token,
@@ -94,7 +102,6 @@ int main(int argc, char **argv) {
   // create builder, context, and pass manager (for optimization)
   curr_builder = LLVMCreateBuilder();
   curr_ctx = LLVMGetGlobalContext();
-
   // open .fy file
   add_file_to_queue((char *)".", argv[1]);
   // parse and compile everything into LLVM IR

@@ -56,6 +56,12 @@ public:
             tt_to_str(other->type_type()));
     return true;
   };
+
+  // Casts `value` (of type `this->llvm_value`) to `other`
+  virtual LLVMValueRef cast_to(Type *other, LLVMValueRef value) {
+    error("cast_to not implemented yet for this type");
+    return nullptr;
+  }
 };
 
 class VoidType : public Type {
@@ -78,8 +84,11 @@ public:
   NumType(char *bits_str, unsigned int bits_str_len, bool is_floating,
           bool is_signed)
       : is_floating(is_floating), is_signed(is_signed) {
-    bits = parse_pos_int(bits_str, bits_str_len, 10);
-    byte_size = bits * 8;
+    if (streql(bits_str, bits_str_len, "_ptrsize", 8))
+      bits = LLVMPointerSize(target_data) * 8;
+    else
+      bits = parse_pos_int(bits_str, bits_str_len, 10);
+    byte_size = bits / 8;
   }
   LLVMTypeRef llvm_type() {
     switch (bits) {
@@ -138,6 +147,26 @@ public:
     if (a_sgn != b_sgn)
       fprintf(stderr, "\n\t- signed: A=%d, B=%d", a_sgn, b_sgn);
   }
+  LLVMValueRef cast_to(Type *other, LLVMValueRef value) {
+    if (NumType *num = dynamic_cast<NumType *>(other)) {
+      if (!num->is_floating && is_floating)
+        return LLVMBuildCast(curr_builder,
+                             this->is_signed ? LLVMFPToSI : LLVMFPToUI, value,
+                             other->llvm_type(), "");
+      if (num->is_floating && !is_floating)
+        return LLVMBuildCast(curr_builder,
+                             this->is_signed ? LLVMSIToFP : LLVMUIToFP, value,
+                             other->llvm_type(), "");
+      if (is_floating)
+        return LLVMBuildFPCast(curr_builder, value, num->llvm_type(), "");
+      else
+        return LLVMBuildIntCast2(curr_builder, value, num->llvm_type(),
+                                 is_signed, "");
+      return value;
+    }
+    error("Numbers can't be casted to non-numbers yet");
+    return nullptr;
+  }
 };
 class PointerType : public Type {
 public:
@@ -158,6 +187,13 @@ public:
       return;
     PointerType *b = dynamic_cast<PointerType *>(other);
     return this->get_points_to()->log_diff(b->get_points_to());
+  }
+
+  LLVMValueRef cast_to(Type *other, LLVMValueRef value) {
+    if (PointerType *ptr = dynamic_cast<PointerType *>(other))
+      return LLVMBuildPointerCast(curr_builder, value, other->llvm_type(), "");
+    error("Pointers can't be casted to non-pointers yet");
+    return nullptr;
   }
 };
 class ArrayType : public Type {
@@ -183,6 +219,21 @@ public:
     if (a_count != b_count)
       fprintf(stderr, "\n\t- amount: A=%d, B=%d", a_count, b_count);
     b->elem->log_diff(this->elem);
+  }
+
+  LLVMValueRef cast_to(Type *other, LLVMValueRef value) {
+    if (PointerType *ptr = dynamic_cast<PointerType *>(other)) {
+      if (!ptr->get_points_to()->eq(this->get_elem_type()))
+        error("Array can't be casted to pointer with different type");
+      LLVMValueRef zeros[2] = {
+          LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false),
+          LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false)};
+      // cast [ ... x T ] to T*
+      LLVMValueRef cast = LLVMConstGEP2(llvm_type(), value, zeros, 2);
+      return cast;
+    }
+    error("Pointers can't be casted to non-pointers yet");
+    return nullptr;
   }
 };
 class StructType : public Type {

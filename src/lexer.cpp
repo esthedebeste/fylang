@@ -83,26 +83,34 @@ static int next_token() {
   }
   if (isalpha(last_char)) {
     read_str(&is_alphaish, &identifier_string, &identifier_string_length);
-    if (streq(identifier_string, identifier_string_length, "fun", 3))
+    if (streql(identifier_string, identifier_string_length, "fun", 3))
       return T_FUNCTION;
-    else if (streq(identifier_string, identifier_string_length, "declare", 7))
+    else if (streql(identifier_string, identifier_string_length, "declare", 7))
       return T_DECLARE;
-    else if (streq(identifier_string, identifier_string_length, "if", 2))
+    else if (streql(identifier_string, identifier_string_length, "if", 2))
       return T_IF;
-    else if (streq(identifier_string, identifier_string_length, "else", 4))
+    else if (streql(identifier_string, identifier_string_length, "else", 4))
       return T_ELSE;
-    else if (streq(identifier_string, identifier_string_length, "let", 3))
+    else if (streql(identifier_string, identifier_string_length, "let", 3))
       return T_LET;
-    else if (streq(identifier_string, identifier_string_length, "const", 5))
+    else if (streql(identifier_string, identifier_string_length, "const", 5))
       return T_CONST;
-    else if (streq(identifier_string, identifier_string_length, "while", 5))
+    else if (streql(identifier_string, identifier_string_length, "while", 5))
       return T_WHILE;
-    else if (streq(identifier_string, identifier_string_length, "struct", 6))
+    else if (streql(identifier_string, identifier_string_length, "struct", 6))
       return T_STRUCT;
-    else if (streq(identifier_string, identifier_string_length, "new", 3))
+    else if (streql(identifier_string, identifier_string_length, "new", 3))
       return T_NEW;
-    else if (streq(identifier_string, identifier_string_length, "include", 7))
+    else if (streql(identifier_string, identifier_string_length, "include", 7))
       return T_INCLUDE;
+    else if (streql(identifier_string, identifier_string_length, "type", 4))
+      return T_TYPE;
+    else if (streql(identifier_string, identifier_string_length, "unsigned", 8))
+      return T_UNSIGNED;
+    else if (streql(identifier_string, identifier_string_length, "signed", 6))
+      return T_SIGNED;
+    else if (streql(identifier_string, identifier_string_length, "as", 2))
+      return T_AS;
     return T_IDENTIFIER;
   } else if (isdigit(last_char)) {
     // Number: [0-9]+.?[0-9]*
