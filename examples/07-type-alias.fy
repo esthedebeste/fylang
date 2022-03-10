@@ -1,4 +1,4 @@
-include "std/std"
+include "std/io"
 type number = int32
 
 fun main(): number {

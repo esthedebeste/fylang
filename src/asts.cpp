@@ -111,7 +111,7 @@ public:
     cast_from = value->get_type();
   }
   LLVMValueRef gen_val() {
-    return cast_from->cast_to(cast_to, value->gen_val());
+    return cast_from->required_cast_to(cast_to, value->gen_val());
   }
   Type *get_type() { return cast_to; }
 };
@@ -201,6 +201,7 @@ public:
         new BasicLoadVariable(ptr, type);
     if (value) {
       LLVMValueRef llvm_val = value->gen_val();
+      llvm_val = value->get_type()->required_cast_to(type, llvm_val);
       LLVMBuildStore(curr_builder, llvm_val, ptr);
       return llvm_val;
     } else
@@ -275,6 +276,10 @@ public:
 
 LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
                                NumType *lhs_nt, NumType *rhs_nt) {
+  if (lhs_nt->bits > rhs_nt->bits)
+    R = rhs_nt->required_cast_to(lhs_nt, R);
+  else if (rhs_nt->bits > lhs_nt->bits)
+    L = lhs_nt->required_cast_to(rhs_nt, L);
   bool floating = lhs_nt->is_floating && rhs_nt->is_floating;
   if (floating)
     switch (op) {
@@ -425,8 +430,13 @@ public:
     else if (LHS->get_type()->type_type() == TypeType::Pointer)
       set_to = LHS->gen_val();
     else
-      set_to = LHS->gen_ptr();
+      error("Left side of = not assignable");
     LLVMValueRef val = RHS->gen_val();
+    val = RHS->get_type()->required_cast_to(
+        dynamic_cast<Assignable *>(LHS)
+            ? LHS->get_type()
+            : dynamic_cast<PointerType *>(LHS->get_type())->get_points_to(),
+        val);
     LLVMBuildStore(curr_builder, val, set_to);
     return ptr ? set_to : val;
   }
@@ -497,9 +507,6 @@ public:
                             operand->gen_val(), "loadtmp");
     }
     case '&':
-      if (operand->get_type()->type_type() == TypeType::Function)
-        error("Can't get pointer to a function. When passing a function as an "
-              "argument, you don't need to use '&func'!");
       return operand->gen_ptr();
     default:
       fprintf(stderr, "Error: invalid prefix unary operator '%c'", op);
@@ -531,13 +538,12 @@ public:
       if (PointerType *ptr = dynamic_cast<PointerType *>(called->get_type()))
         func_t = dynamic_cast<FunctionType *>(ptr->get_points_to());
       else {
-
         fprintf(stderr, "Error: Function doesn't exist or is not a function");
         exit(1);
       }
     }
-    if (args_len != func_t->arguments_len) {
-
+    if (func_t->vararg ? args_len < func_t->arguments_len
+                       : args_len != func_t->arguments_len) {
       fprintf(stderr,
               "Error: Incorrect # arguments passed. (Expected %d, got %d)",
               func_t->arguments_len, args_len);
@@ -553,8 +559,12 @@ public:
     if (!func)
       error("Unknown function referenced");
     LLVMValueRef *arg_vs = alloc_arr<LLVMValueRef>(args_len);
-    for (unsigned i = 0; i < args_len; i++)
+    for (unsigned i = 0; i < args_len; i++) {
       arg_vs[i] = args[i]->gen_val();
+      if (i < func_t->arguments_len)
+        arg_vs[i] = args[i]->get_type()->required_cast_to(func_t->arguments[i],
+                                                          arg_vs[i]);
+    }
     return LLVMBuildCall2(curr_builder, func_t->llvm_type(), func, arg_vs,
                           args_len,
                           type->type_type() == TypeType::Void ? "" : "calltmp");
@@ -628,32 +638,34 @@ public:
 /// NewExprAST - Expression class for creating an instance of a struct (new
 /// String { pointer = "hi", length = 2 } ).
 class NewExprAST : public ExprAST {
-  StructType *type;
+  StructType *s_type;
+  PointerType *p_type;
   unsigned int *indexes;
   char **keys;
   ExprAST **values;
   unsigned int key_count;
 
 public:
-  NewExprAST(StructType *type, char **keys, unsigned int *key_lens,
+  NewExprAST(StructType *s_type, char **keys, unsigned int *key_lens,
              ExprAST **values, unsigned int key_count)
-      : type(type), values(values), key_count(key_count) {
+      : s_type(s_type), values(values), key_count(key_count) {
     indexes = alloc_arr<unsigned int>(key_count);
     for (unsigned int i = 0; i < key_count; i++)
-      indexes[i] = type->get_index(keys[i], key_lens[i]);
+      indexes[i] = s_type->get_index(keys[i], key_lens[i]);
+    p_type = new PointerType(s_type);
   }
 
-  Type *get_type() { return type; }
+  Type *get_type() { return p_type; }
 
   LLVMValueRef gen_val() {
     LLVMValueRef ptr =
-        LLVMBuildAlloca(curr_builder, type->llvm_type(), "newalloc");
+        LLVMBuildAlloca(curr_builder, s_type->llvm_type(), "newalloc");
     for (unsigned int i = 0; i < key_count; i++) {
       LLVMValueRef llvm_indexes[2] = {
           LLVMConstInt(LLVMInt32Type(), 0, false),
           LLVMConstInt(LLVMInt32Type(), indexes[i], false)};
       LLVMValueRef set_ptr = LLVMBuildStructGEP2(
-          curr_builder, type->llvm_type(), ptr, indexes[i], "tmpgep");
+          curr_builder, s_type->llvm_type(), ptr, indexes[i], "tmpgep");
       LLVMBuildStore(curr_builder, values[i]->gen_val(), set_ptr);
     }
     return ptr;
@@ -819,22 +831,21 @@ public:
   char **arg_names;
   unsigned int *arg_name_lengths;
   Type **arg_types;
-  Type *return_type;
   FunctionType *type;
   unsigned int arg_count;
   char *name;
   unsigned int name_len;
   PrototypeAST(char *name, unsigned int name_len, char **arg_names,
                unsigned int *arg_name_lengths, Type **arg_types,
-               unsigned int arg_count, Type *return_type)
+               unsigned int arg_count, Type *return_type, bool vararg)
       : name(name), name_len(name_len), arg_names(arg_names),
         arg_name_lengths(arg_name_lengths), arg_types(arg_types),
-        arg_count(arg_count), return_type(return_type) {
+        arg_count(arg_count) {
     for (unsigned i = 0; i != arg_count; ++i)
       curr_named_var_types[std::string(arg_names[i], arg_name_lengths[i])] =
           arg_types[i];
     curr_named_var_types[std::string(name, name_len)] = type =
-        new FunctionType(return_type, arg_types, arg_count);
+        new FunctionType(return_type, arg_types, arg_count, vararg);
   }
   FunctionType *get_type() { return type; }
   LLVMValueRef codegen() {
@@ -844,12 +855,9 @@ public:
       llvm_arg_types[i] = arg_types[i]->llvm_type();
     }
 
-    LLVMTypeRef function_type = LLVMFunctionType(
-        return_type->llvm_type(), llvm_arg_types, arg_count, false);
-
-    LLVMValueRef func = LLVMAddFunction(curr_module, name, function_type);
+    LLVMValueRef func = LLVMAddFunction(curr_module, name, type->llvm_type());
     curr_named_variables[std::string(name, name_len)] =
-        new ConstVariable(func, nullptr);
+        new ConstVariable(func, func);
     // Set names for all arguments.
     LLVMValueRef *params = alloc_arr<LLVMValueRef>(arg_count);
     LLVMGetParams(func, params);
@@ -898,8 +906,8 @@ class FunctionAST : public TopLevelAST {
 
 public:
   FunctionAST(PrototypeAST *proto, ExprAST *body) {
-    if (proto->return_type == nullptr)
-      proto->type->return_type = proto->return_type = body->get_type();
+    if (proto->type->return_type == nullptr)
+      proto->type->return_type = body->get_type();
     this->proto = proto;
     this->body = body;
   }
@@ -931,6 +939,8 @@ public:
       curr_named_variables[LLVMGetValueName2(params[i], &unused)] =
           new ConstVariable(params[i], nullptr);
     LLVMValueRef ret_val = body->gen_val();
+    ret_val =
+        body->get_type()->required_cast_to(proto->type->return_type, ret_val);
     // Finish off the function.
     LLVMBuildRet(curr_builder, ret_val);
     // doesnt exist in c api (i think)

@@ -1,4 +1,4 @@
-include "std/std"
+include "std/io"
 
 fun main() {
 	// eputs is defined in std

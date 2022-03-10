@@ -81,36 +81,43 @@ static int next_token() {
   while (isspace(last_char)) {
     last_char = next_char();
   }
-  if (isalpha(last_char)) {
+  if (isalpha(last_char) || last_char == '_') {
     read_str(&is_alphaish, &identifier_string, &identifier_string_length);
-    if (streql(identifier_string, identifier_string_length, "fun", 3))
+#define id_str identifier_string
+#define id_len identifier_string_length
+    if (streql(id_str, id_len, "fun", 3))
       return T_FUNCTION;
-    else if (streql(identifier_string, identifier_string_length, "declare", 7))
+    else if (streql(id_str, id_len, "declare", 7))
       return T_DECLARE;
-    else if (streql(identifier_string, identifier_string_length, "if", 2))
+    else if (streql(id_str, id_len, "if", 2))
       return T_IF;
-    else if (streql(identifier_string, identifier_string_length, "else", 4))
+    else if (streql(id_str, id_len, "else", 4))
       return T_ELSE;
-    else if (streql(identifier_string, identifier_string_length, "let", 3))
+    else if (streql(id_str, id_len, "let", 3))
       return T_LET;
-    else if (streql(identifier_string, identifier_string_length, "const", 5))
+    else if (streql(id_str, id_len, "const", 5))
       return T_CONST;
-    else if (streql(identifier_string, identifier_string_length, "while", 5))
+    else if (streql(id_str, id_len, "while", 5))
       return T_WHILE;
-    else if (streql(identifier_string, identifier_string_length, "struct", 6))
+    else if (streql(id_str, id_len, "struct", 6))
       return T_STRUCT;
-    else if (streql(identifier_string, identifier_string_length, "new", 3))
+    else if (streql(id_str, id_len, "new", 3))
       return T_NEW;
-    else if (streql(identifier_string, identifier_string_length, "include", 7))
+    else if (streql(id_str, id_len, "include", 7))
       return T_INCLUDE;
-    else if (streql(identifier_string, identifier_string_length, "type", 4))
+    else if (streql(id_str, id_len, "type", 4))
       return T_TYPE;
-    else if (streql(identifier_string, identifier_string_length, "unsigned", 8))
+    else if (streql(id_str, id_len, "unsigned", 8))
       return T_UNSIGNED;
-    else if (streql(identifier_string, identifier_string_length, "signed", 6))
+    else if (streql(id_str, id_len, "signed", 6))
       return T_SIGNED;
-    else if (streql(identifier_string, identifier_string_length, "as", 2))
+    else if (streql(id_str, id_len, "as", 2))
       return T_AS;
+    // __ because vararg can't be used outside of declarations
+    else if (streql(id_str, id_len, "__VARARG__", 10))
+      return T_VARARG;
+#undef id_str
+#undef id_len
     return T_IDENTIFIER;
   } else if (isdigit(last_char)) {
     // Number: [0-9]+.?[0-9]*

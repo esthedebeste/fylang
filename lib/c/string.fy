@@ -1,28 +1,26 @@
 // string.h
 include "stddef.fy"
 
-declare fun memccpy(arg: *void, arg: *void, arg: int, arg: size_t): *void
-declare fun memchr(arg: *void, arg: int, arg: size_t): *void
-declare fun memcmp(arg: *void, arg: *void, arg: size_t): int
-declare fun memcpy(arg: *void, arg: *void, arg: size_t): *void
-declare fun memmove(arg: *void, arg: *void, arg: size_t): *void
-declare fun memset(arg: *void, arg: int, arg: size_t): *void
-declare fun strcat(arg: *char, arg: *char): *char
-declare fun strchr(arg: *char, arg: int): *char
-declare fun strcmp(arg: *char, arg: *char): int
-declare fun strcoll(arg: *char, arg: *char): int
-declare fun strcpy(arg: *char, arg: *char): *char
-declare fun strcspn(arg: *char, arg: *char): size_t
-declare fun strdup(arg: *char): *char
-declare fun strerror(arg: int): *char
-declare fun strlen(arg: *char): size_t
-declare fun strncat(arg: *char, arg: *char, arg: size_t): *char
-declare fun strncmp(arg: *char, arg: *char, arg: size_t): int
-declare fun strncpy(arg: *char, arg: *char, arg: size_t): *char
-declare fun strpbrk(arg: *char, arg: *char): *char
-declare fun strrchr(arg: *char, arg: int): *char
-declare fun strspn(arg: *char, arg: *char): size_t
-declare fun strstr(arg: *char, arg: *char): *char
-declare fun strtok(arg: *char, arg: *char): *char
-declare fun strtok_r(arg: *char, arg: *char, arg: *char): *char
-declare fun strxfrm(arg: *char, arg: *char, arg: size_t): size_t
+declare fun memchr(s: *void, c: *void, n: size_t): *void
+declare fun memcmp(s1: *void, s2: *void, n: size_t): int
+declare fun memcpy(dest: *void, src: *void, n: size_t): *void
+declare fun memmove(dest: *void, src: *void, n: size_t): *void
+declare fun memset(ptr: *void, c: int, n: size_t): *void
+declare fun strcat(dest: *char, src: *char): *char
+declare fun strchr(str: *char, c: int): *char
+declare fun strcmp(str1: *char, str2: *char): int
+declare fun strcoll(str1: *char, str2: *char): int
+declare fun strcpy(dest: *char, src: *char): *char
+declare fun strcspn(str: *char, reject: *char): size_t
+declare fun strdup(str: *char): *char
+declare fun strerror(err: int): *char
+declare fun strlen(str: *char): size_t
+declare fun strncat(dest: *char, src: *char, n: size_t): *char
+declare fun strncmp(str1: *char, str2: *char, n: size_t): int
+declare fun strncpy(dest: *char, src: *char, n: size_t): *char
+declare fun strpbrk(str: *char, accept: *char): *char
+declare fun strrchr(str: *char, c: int): *char
+declare fun strspn(str: *char, accept: *char): size_t
+declare fun strstr(str: *char, finding: *char): *char
+declare fun strtok(str: *char, delimiters: *char): *char
+declare fun strxfrm(dest: *char, str: *char, n: size_t): size_t

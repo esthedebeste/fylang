@@ -1,35 +1,43 @@
 #include "utils.cpp"
 
 #include "parser.cpp"
+#include "ucr.cpp"
+bool DEBUG = false;
 static void handle_definition() {
   auto ast = parse_definition();
-  fprintf(stderr, "Parsed a function definition.\n");
+  if (DEBUG)
+    fprintf(stderr, "Parsed a function definition.\n");
   ast->gen_toplevel();
 }
 
 static void handle_declare() {
   auto ast = parse_declare();
-  fprintf(stderr, "Parsed a declare\n");
+  if (DEBUG)
+    fprintf(stderr, "Parsed a declare\n");
   ast->gen_toplevel();
 }
 static void handle_global_let() {
   auto ast = parse_let_expr(true);
-  fprintf(stderr, "Parsed a global variable\n");
+  if (DEBUG)
+    fprintf(stderr, "Parsed a global variable\n");
   ast->gen_toplevel();
 }
 static void handle_global_struct() {
   auto ast = parse_struct();
-  fprintf(stderr, "Parsed a struct definition\n");
+  if (DEBUG)
+    fprintf(stderr, "Parsed a struct definition\n");
   ast->gen_toplevel();
 }
 static void handle_global_type() {
   auto ast = parse_type_definition();
-  fprintf(stderr, "Parsed a type definition\n");
+  if (DEBUG)
+    fprintf(stderr, "Parsed a type definition\n");
   ast->gen_toplevel();
 }
 static void handle_global_include() {
   char *file_name = parse_include();
-  fprintf(stderr, "Parsed an include\n");
+  if (DEBUG)
+    fprintf(stderr, "Parsed an include\n");
   CharReader *curr_file = queue[queue_len - 1];
   add_file_to_queue(curr_file->file_path, file_name);
   get_next_token();
@@ -78,6 +86,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  if (getenv("FY_DEBUG"))
+    DEBUG = true;
   std_dir = get_relative_path(argv[0], (char *)"../lib");
   // host machine triple
   char *target_triple = LLVMGetDefaultTargetTriple();
@@ -106,11 +116,12 @@ int main(int argc, char **argv) {
   add_file_to_queue((char *)".", argv[1]);
   // parse and compile everything into LLVM IR
   main_loop();
+  remove_unused_globals(curr_module, LLVMGetNamedFunction(curr_module, "main"));
   // export LLVM IR into other file
-  char *err_msg;
   char *output = LLVMPrintModuleToString(curr_module);
   FILE *output_file = fopen(argv[2], "w");
   fprintf(output_file, "%s", output);
+  fprintf(stderr, "\nSuccessfully compiled %s to %s\n", argv[1], argv[2]);
   // dispose of a bunch of stuff
   LLVMDisposeMessage(output);
   LLVMDisposeModule(curr_module);

@@ -57,10 +57,36 @@ public:
     return true;
   };
 
-  // Casts `value` (of type `this->llvm_value`) to `other`
-  virtual LLVMValueRef cast_to(Type *other, LLVMValueRef value) {
+  // Casts `value` (of type `this->llvm_type`) to `other`.
+  virtual LLVMValueRef do_cast_to(Type *other, LLVMValueRef value,
+                                  char **error_msg) {
+    if (eq(other))
+      return value;
+    log_diff(other);
     error("cast_to not implemented yet for this type");
     return nullptr;
+  }
+  // Casts `value` (of type `this->llvm_value`) to `other`.
+  // Will return nullptr if invalid cast.
+  LLVMValueRef try_cast_to(Type *other, LLVMValueRef value) {
+    if (eq(other))
+      return value;
+    char *err_msg;
+    LLVMValueRef casted = do_cast_to(other, value, &err_msg);
+    if (err_msg)
+      return nullptr;
+    return casted;
+  }
+  // Casts `value` (of type `this->llvm_value`) to `other`.
+  // Will exit and error if invalid cast.
+  LLVMValueRef required_cast_to(Type *other, LLVMValueRef value) {
+    if (eq(other))
+      return value;
+    char *err_msg = 0;
+    LLVMValueRef casted = do_cast_to(other, value, &err_msg);
+    if (err_msg)
+      error(err_msg);
+    return casted;
   }
 };
 
@@ -147,7 +173,7 @@ public:
     if (a_sgn != b_sgn)
       fprintf(stderr, "\n\t- signed: A=%d, B=%d", a_sgn, b_sgn);
   }
-  LLVMValueRef cast_to(Type *other, LLVMValueRef value) {
+  LLVMValueRef do_cast_to(Type *other, LLVMValueRef value, char **err_msg) {
     if (NumType *num = dynamic_cast<NumType *>(other)) {
       if (!num->is_floating && is_floating)
         return LLVMBuildCast(curr_builder,
@@ -164,7 +190,7 @@ public:
                                  is_signed, "");
       return value;
     }
-    error("Numbers can't be casted to non-numbers yet");
+    *err_msg = (char *)"Numbers can't be casted to non-numbers yet";
     return nullptr;
   }
 };
@@ -178,6 +204,8 @@ public:
   }
   TypeType type_type() { return TypeType::Pointer; }
   bool eq(Type *other) {
+    if (other->type_type() == TypeType::Function)
+      return other->eq(this);
     if (PointerType *other_n = dynamic_cast<PointerType *>(other))
       return other_n->points_to->eq(this->points_to);
     return false;
@@ -189,10 +217,10 @@ public:
     return this->get_points_to()->log_diff(b->get_points_to());
   }
 
-  LLVMValueRef cast_to(Type *other, LLVMValueRef value) {
+  LLVMValueRef do_cast_to(Type *other, LLVMValueRef value, char **err_msg) {
     if (PointerType *ptr = dynamic_cast<PointerType *>(other))
       return LLVMBuildPointerCast(curr_builder, value, other->llvm_type(), "");
-    error("Pointers can't be casted to non-pointers yet");
+    *err_msg = (char *)"Pointers can't be casted to non-pointers yet";
     return nullptr;
   }
 };
@@ -221,10 +249,13 @@ public:
     b->elem->log_diff(this->elem);
   }
 
-  LLVMValueRef cast_to(Type *other, LLVMValueRef value) {
+  LLVMValueRef do_cast_to(Type *other, LLVMValueRef value, char **err_msg) {
     if (PointerType *ptr = dynamic_cast<PointerType *>(other)) {
-      if (!ptr->get_points_to()->eq(this->get_elem_type()))
-        error("Array can't be casted to pointer with different type");
+      if (!ptr->get_points_to()->eq(this->get_elem_type())) {
+        *err_msg =
+            (char *)"Array can't be casted to pointer with different type";
+        return nullptr;
+      }
       LLVMValueRef zeros[2] = {
           LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false),
           LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false)};
@@ -232,7 +263,7 @@ public:
       LLVMValueRef cast = LLVMConstGEP2(llvm_type(), value, zeros, 2);
       return cast;
     }
-    error("Pointers can't be casted to non-pointers yet");
+    *err_msg = (char *)"Arrays can't be casted to non-pointers yet";
     return nullptr;
   }
 };
@@ -276,11 +307,15 @@ public:
   LLVMTypeRef llvm_type() { return llvm_struct_type; }
   TypeType type_type() { return TypeType::Struct; }
   bool eq(Type *other) {
-    // structs are unique
-    return this == other;
+    if (StructType *other_s = dynamic_cast<StructType *>(other))
+      // structs are unique
+      return this == other_s;
+    return false;
   }
   void log_diff(Type *other) {
-    if (this != other)
+    if (log_type_diff(other))
+      return;
+    if (this != dynamic_cast<StructType *>(other))
       fprintf(stderr, "Structs are unique.");
   }
 };
@@ -289,17 +324,18 @@ public:
   Type *return_type;
   Type **arguments;
   unsigned int arguments_len;
+  bool vararg;
 
-  FunctionType(Type *return_type, Type **arguments, unsigned int arguments_len)
+  FunctionType(Type *return_type, Type **arguments, unsigned int arguments_len,
+               bool vararg)
       : return_type(return_type), arguments(arguments),
-        arguments_len(arguments_len) {}
+        arguments_len(arguments_len), vararg(vararg) {}
   LLVMTypeRef llvm_type() {
     LLVMTypeRef *llvm_args = alloc_arr<LLVMTypeRef>(arguments_len);
     for (unsigned int i = 0; i < arguments_len; i++)
       llvm_args[i] = arguments[i]->llvm_type();
-    // todo: vararg functions?
     return LLVMFunctionType(return_type->llvm_type(), llvm_args, arguments_len,
-                            false);
+                            vararg);
   }
   TypeType type_type() { return TypeType::Function; }
   bool eq(Type *other) {
@@ -309,6 +345,8 @@ public:
     if (!other_f)
       return false;
     if (other_f->arguments_len != arguments_len)
+      return false;
+    if (other_f->vararg != vararg)
       return false;
     if (other_f->return_type->neq(return_type))
       return false;

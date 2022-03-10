@@ -1,4 +1,4 @@
-include "std/std"
+include "std/io"
 
 fun main() {
 	let str = "hello world!"

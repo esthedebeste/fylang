@@ -16,7 +16,6 @@ extern "C" {
 }
 
 char *std_dir;
-
 enum Tokens : const int {
   T_EOF = -1,        // end of file
   T_IDENTIFIER = -2, // foo
@@ -45,7 +44,9 @@ enum Tokens : const int {
   T_UNSIGNED = -25,  // unsigned
   T_SIGNED = -26,    // signed
   T_AS = -27,        // as
+  T_VARARG = -28,    // __VARARG__
 };
+#include "errno.h"
 static LLVMContextRef curr_ctx;
 static LLVMBuilderRef curr_builder;
 static LLVMModuleRef curr_module;

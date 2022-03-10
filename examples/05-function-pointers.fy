@@ -1,18 +1,17 @@
-include "std/std"
+include "std/io"
 include "c/string"
 
 // in arguments, functions can be annotated as
 // `*fun(arg_type1, arg_type2, ...): return_type`
-fun put_filtered(str: *char, predicate: *fun(char): bool) {
-	const len = strlen(str) as int32
-	let i = 0i
+fun print_filtered(str: *char, predicate: *fun(char): bool) {
+	const len = strlen(str)
+	let i = 0
 	while(i < len) {
 		// Access string indexes with *(ptr+offset)
 		let char = str[i]
-		if(predicate(char)) putchar(char) else 0i
-		i = i + 1i
-	} else 0i
-	0i
+		if(predicate(char)) eputc(char) else 0i
+		i = i + 1
+	} else 0
 }
 
 fun is_alphanum(ch: char)
@@ -21,6 +20,6 @@ fun is_alphanum(ch: char)
 fun main() {
 	let str = "F@#(*i@#&l!#*(&t@$&*e!@)r@#()e{:><}d#!@*("
 	// We pass the is_alphanum function to put_filtered as a predicate
-	put_filtered(str, is_alphanum) // "Filtered"
+	print_filtered(str, &is_alphanum) // "Filtered"
 	0i
 }

@@ -30,8 +30,14 @@ static Type *parse_function_type() {
   eat('(');
   Type **arg_types = alloc_arr<Type *>(64);
   unsigned int args_len = 0;
+  bool vararg = false;
   if (curr_token != ')') {
     while (1) {
+      if (curr_token == T_VARARG) {
+        eat(T_VARARG);
+        vararg = true;
+        break;
+      }
       if (auto arg = parse_type_unary())
         arg_types[args_len++] = arg;
       if (curr_token == ')')
@@ -44,7 +50,7 @@ static Type *parse_function_type() {
   eat(')');
   eat(':');
   Type *return_type = parse_type_unary();
-  return new FunctionType(return_type, arg_types, args_len);
+  return new FunctionType(return_type, arg_types, args_len, vararg);
 }
 
 static Type *parse_num_type() {
@@ -82,13 +88,6 @@ static TypeDefAST *parse_type_definition() {
   Type *t = parse_type_unary();
   return new TypeDefAST(name, name_len, t);
 }
-static ExprAST *parse_number_expr() {
-  // TODO: parse number base (hex 0x, binary 0b, octal 0o)
-  auto result =
-      new NumberExprAST(num_value, num_length, num_type, num_has_dot, 10);
-  get_next_token(); // consume the number
-  return result;
-}
 
 static Type *parse_type_unary() {
   if (curr_token == T_FUNCTION)
@@ -125,6 +124,36 @@ static Type *parse_type_unary() {
     }
   }
   return nullptr;
+}
+static Type *parse_type_postfix() {
+  Type *prev = parse_type_unary();
+  while (1) {
+    switch (curr_token) {
+    case '[': {
+      eat('[');
+      if (curr_token == ']') {
+        eat(']');
+        prev = new PointerType(prev);
+      }
+      char *num = num_value;
+      unsigned int num_len = num_length;
+      if (num_has_dot)
+        error("List lengths have to be integers");
+      eat(T_NUMBER);
+      eat(']');
+      prev = new ArrayType(prev, parse_pos_int(num, num_len, 10));
+    }
+    default:
+      return prev;
+    }
+  }
+}
+static ExprAST *parse_number_expr() {
+  // TODO: parse number base (hex 0x, binary 0b, octal 0o)
+  auto result =
+      new NumberExprAST(num_value, num_length, num_type, num_has_dot, 10);
+  get_next_token(); // consume the number
+  return result;
 }
 static ExprAST *parse_char_expr() {
   auto result = new CharExprAST(char_value);
@@ -414,10 +443,16 @@ static PrototypeAST *parse_prototype(Type *default_return_type = nullptr) {
   unsigned int *arg_name_lens = alloc_arr<unsigned int>(64);
   Type **arg_types = alloc_arr<Type *>(64);
   unsigned int arg_count = 0;
+  bool vararg = false;
 
   get_next_token();
   if (curr_token != ')')
     while (1) {
+      if (curr_token == T_VARARG) {
+        eat(T_VARARG);
+        vararg = true;
+        break;
+      }
       arg_names[arg_count] = identifier_string;
       arg_name_lens[arg_count] = identifier_string_length;
       eat(T_IDENTIFIER, (char *)"identifier");
@@ -439,7 +474,7 @@ static PrototypeAST *parse_prototype(Type *default_return_type = nullptr) {
     return_type = default_return_type;
 
   return new PrototypeAST(fn_name, fn_name_len, arg_names, arg_name_lens,
-                          arg_types, arg_count, return_type);
+                          arg_types, arg_count, return_type, vararg);
 }
 
 /// definition ::= 'fun' prototype expression
@@ -459,11 +494,11 @@ static DeclareExprAST *parse_declare() {
     get_next_token();
     PrototypeAST *proto = parse_prototype(new NumType(32, false, true));
     return new DeclareExprAST(proto);
-  } else if (curr_token == T_CONST) {
+  } else if (curr_token == T_CONST || curr_token == T_LET) {
     LetExprAST *let = parse_let_expr();
     return new DeclareExprAST(let);
   } else
-    eat(0, (char *)"fun' or 'const");
+    eat(0, (char *)"fun', 'let', or 'const");
   return nullptr;
 }
 
