@@ -19,7 +19,7 @@ enum TypeType {
   Number = 1,
   Pointer = 2,
   Function = 3,
-  Array = 4,
+  Tuple = 4,
   Struct = 5
 };
 static const char *tt_to_str(TypeType tt) {
@@ -32,8 +32,8 @@ static const char *tt_to_str(TypeType tt) {
     return "pointer";
   case Function:
     return "function";
-  case Array:
-    return "array";
+  case Tuple:
+    return "tuple";
   case Struct:
     return "struct";
   }
@@ -48,46 +48,12 @@ public:
     return this->type_type() == other->type_type();
   };
   virtual bool neq(Type *other) { return !eq(other); }
-  virtual void log_diff(Type *other) { log_type_diff(other); }
-  bool log_type_diff(Type *other) {
-    if (this->type_type() == other->type_type())
-      return false;
-    fprintf(stderr, "\n\t- type: A=%s, B=%s", tt_to_str(this->type_type()),
-            tt_to_str(other->type_type()));
-    return true;
-  };
+  void log_diff(Type *other) {
+    fprintf(stderr, "%s does not match %s", this->stringify(),
+            other->stringify());
+  }
 
-  // Casts `value` (of type `this->llvm_type`) to `other`.
-  virtual LLVMValueRef do_cast_to(Type *other, LLVMValueRef value,
-                                  char **error_msg) {
-    if (eq(other))
-      return value;
-    log_diff(other);
-    error("cast_to not implemented yet for this type");
-    return nullptr;
-  }
-  // Casts `value` (of type `this->llvm_value`) to `other`.
-  // Will return nullptr if invalid cast.
-  LLVMValueRef try_cast_to(Type *other, LLVMValueRef value) {
-    if (eq(other))
-      return value;
-    char *err_msg;
-    LLVMValueRef casted = do_cast_to(other, value, &err_msg);
-    if (err_msg)
-      return nullptr;
-    return casted;
-  }
-  // Casts `value` (of type `this->llvm_value`) to `other`.
-  // Will exit and error if invalid cast.
-  LLVMValueRef required_cast_to(Type *other, LLVMValueRef value) {
-    if (eq(other))
-      return value;
-    char *err_msg = 0;
-    LLVMValueRef casted = do_cast_to(other, value, &err_msg);
-    if (err_msg)
-      error(err_msg);
-    return casted;
-  }
+  virtual char *stringify() { error("stringify not implemented yet"); }
 };
 
 class VoidType : public Type {
@@ -143,10 +109,7 @@ public:
         return float_128_type;
       return int_128_type;
     }
-    fprintf(
-        stderr,
-        "TypeError: Unknown numerical type (%d bits, %d floating, %d signed)",
-        bits, is_floating, is_signed);
+    fprintf(stderr, "TypeError: Unknown numerical type %s", this->stringify());
     exit(1);
   }
   TypeType type_type() { return TypeType::Number; }
@@ -156,42 +119,12 @@ public:
              other_n->is_signed == is_signed;
     return false;
   }
-  void log_diff(Type *other) {
-    if (log_type_diff(other))
-      return;
-    NumType *b = dynamic_cast<NumType *>(other);
-    unsigned int a_bits = this->bits;
-    unsigned int b_bits = b->bits;
-    if (a_bits != b_bits)
-      fprintf(stderr, "\n\t- bits: A=%d, B=%d", a_bits, b_bits);
-    bool a_flt = this->is_floating;
-    bool b_flt = b->is_floating;
-    if (a_flt != b_flt)
-      fprintf(stderr, "\n\t- floating: A=%d, B=%d", a_flt, b_flt);
-    bool a_sgn = this->is_signed;
-    bool b_sgn = b->is_signed;
-    if (a_sgn != b_sgn)
-      fprintf(stderr, "\n\t- signed: A=%d, B=%d", a_sgn, b_sgn);
-  }
-  LLVMValueRef do_cast_to(Type *other, LLVMValueRef value, char **err_msg) {
-    if (NumType *num = dynamic_cast<NumType *>(other)) {
-      if (!num->is_floating && is_floating)
-        return LLVMBuildCast(curr_builder,
-                             this->is_signed ? LLVMFPToSI : LLVMFPToUI, value,
-                             other->llvm_type(), "");
-      if (num->is_floating && !is_floating)
-        return LLVMBuildCast(curr_builder,
-                             this->is_signed ? LLVMSIToFP : LLVMUIToFP, value,
-                             other->llvm_type(), "");
-      if (is_floating)
-        return LLVMBuildFPCast(curr_builder, value, num->llvm_type(), "");
-      else
-        return LLVMBuildIntCast2(curr_builder, value, num->llvm_type(),
-                                 is_signed, "");
-      return value;
-    }
-    *err_msg = (char *)"Numbers can't be casted to non-numbers yet";
-    return nullptr;
+  char *stringify() {
+    const char *typ = is_floating ? "float" : is_signed ? "int" : "uint";
+    char *str = alloc_c(strlen(typ) + log10(bits));
+    strcat(str, typ);
+    strcat(str, num_to_str(bits));
+    return str;
   }
 };
 class PointerType : public Type {
@@ -210,61 +143,40 @@ public:
       return other_n->points_to->eq(this->points_to);
     return false;
   }
-  void log_diff(Type *other) {
-    if (log_type_diff(other))
-      return;
-    PointerType *b = dynamic_cast<PointerType *>(other);
-    return this->get_points_to()->log_diff(b->get_points_to());
-  }
 
-  LLVMValueRef do_cast_to(Type *other, LLVMValueRef value, char **err_msg) {
-    if (PointerType *ptr = dynamic_cast<PointerType *>(other))
-      return LLVMBuildPointerCast(curr_builder, value, other->llvm_type(), "");
-    *err_msg = (char *)"Pointers can't be casted to non-pointers yet";
-    return nullptr;
+  char *stringify() {
+    char *contains = points_to->stringify();
+    char *str = alloc_c(4 /*strlen("ptr_")*/ + strlen(contains));
+    strcat(str, "ptr_");
+    strcat(str, contains);
+    return str;
   }
 };
-class ArrayType : public Type {
+class TupleType : public Type {
 public:
   Type *elem;
   unsigned int count;
-  ArrayType(Type *elem, unsigned int count) : elem(elem), count(count) {}
+  TupleType(Type *elem, unsigned int count) : elem(elem), count(count) {}
   Type *get_elem_type() { return elem; }
   unsigned int get_elem_count() { return count; }
   LLVMTypeRef llvm_type() { return LLVMArrayType(elem->llvm_type(), count); }
-  TypeType type_type() { return TypeType::Array; }
+  TypeType type_type() { return TypeType::Tuple; }
   bool eq(Type *other) {
-    if (ArrayType *other_arr = dynamic_cast<ArrayType *>(other))
+    if (TupleType *other_arr = dynamic_cast<TupleType *>(other))
       return other_arr->elem->eq(this->elem) && other_arr->count == this->count;
     return false;
   }
-  void log_diff(Type *other) {
-    if (log_type_diff(other))
-      return;
-    ArrayType *b = dynamic_cast<ArrayType *>(other);
-    unsigned int a_count = this->count;
-    unsigned int b_count = b->count;
-    if (a_count != b_count)
-      fprintf(stderr, "\n\t- amount: A=%d, B=%d", a_count, b_count);
-    b->elem->log_diff(this->elem);
-  }
 
-  LLVMValueRef do_cast_to(Type *other, LLVMValueRef value, char **err_msg) {
-    if (PointerType *ptr = dynamic_cast<PointerType *>(other)) {
-      if (!ptr->get_points_to()->eq(this->get_elem_type())) {
-        *err_msg =
-            (char *)"Array can't be casted to pointer with different type";
-        return nullptr;
-      }
-      LLVMValueRef zeros[2] = {
-          LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false),
-          LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false)};
-      // cast [ ... x T ] to T*
-      LLVMValueRef cast = LLVMConstGEP2(llvm_type(), value, zeros, 2);
-      return cast;
-    }
-    *err_msg = (char *)"Arrays can't be casted to non-pointers yet";
-    return nullptr;
+  char *stringify() {
+    char *contains = elem->stringify();
+    unsigned int count_len = log10(count);
+    char *str = alloc_c(2 + strlen(contains) + 3 + count_len + 2);
+    strcat(str, "( ");
+    strcat(str, contains);
+    strcat(str, " * ");
+    strcat(str, num_to_str(count));
+    strcat(str, " )");
+    return str;
   }
 };
 class StructType : public Type {
@@ -302,7 +214,6 @@ public:
       }
     }
     error("Struct does not have key");
-    return -1;
   }
   LLVMTypeRef llvm_type() { return llvm_struct_type; }
   TypeType type_type() { return TypeType::Struct; }
@@ -312,29 +223,24 @@ public:
       return this == other_s;
     return false;
   }
-  void log_diff(Type *other) {
-    if (log_type_diff(other))
-      return;
-    if (this != dynamic_cast<StructType *>(other))
-      fprintf(stderr, "Structs are unique.");
-  }
+  char *stringify() { return strdup(name); }
 };
 class FunctionType : public Type {
 public:
   Type *return_type;
   Type **arguments;
-  unsigned int arguments_len;
+  unsigned int arg_count;
   bool vararg;
 
-  FunctionType(Type *return_type, Type **arguments, unsigned int arguments_len,
+  FunctionType(Type *return_type, Type **arguments, unsigned int arg_count,
                bool vararg)
-      : return_type(return_type), arguments(arguments),
-        arguments_len(arguments_len), vararg(vararg) {}
+      : return_type(return_type), arguments(arguments), arg_count(arg_count),
+        vararg(vararg) {}
   LLVMTypeRef llvm_type() {
-    LLVMTypeRef *llvm_args = alloc_arr<LLVMTypeRef>(arguments_len);
-    for (unsigned int i = 0; i < arguments_len; i++)
+    LLVMTypeRef *llvm_args = alloc_arr<LLVMTypeRef>(arg_count);
+    for (unsigned int i = 0; i < arg_count; i++)
       llvm_args[i] = arguments[i]->llvm_type();
-    return LLVMFunctionType(return_type->llvm_type(), llvm_args, arguments_len,
+    return LLVMFunctionType(return_type->llvm_type(), llvm_args, arg_count,
                             vararg);
   }
   TypeType type_type() { return TypeType::Function; }
@@ -344,16 +250,35 @@ public:
     FunctionType *other_f = dynamic_cast<FunctionType *>(other);
     if (!other_f)
       return false;
-    if (other_f->arguments_len != arguments_len)
+    if (other_f->arg_count != arg_count)
       return false;
     if (other_f->vararg != vararg)
       return false;
     if (other_f->return_type->neq(return_type))
       return false;
-    for (unsigned int i = 0; i < arguments_len; i++)
+    for (unsigned int i = 0; i < arg_count; i++)
       if (other_f->arguments[i]->neq(arguments[i]))
         return false;
     return true;
   };
-  // todo: log_diff impl for FunctionType
+  char *stringify() {
+    char **arg_strs = alloc_arr<char *>(arg_count);
+    unsigned int final_len = 7; /* "fun(): " */
+    for (unsigned int i = 0; i < arg_count; i++) {
+      char *type = arguments[i]->stringify();
+      arg_strs[i] = type;
+      final_len += strlen(type) + 2 /*", "*/;
+    }
+    char *ret_str = return_type->stringify();
+    final_len += strlen(ret_str);
+    char *str = alloc_c(final_len);
+    strcat(str, "fun(");
+    for (unsigned int i = 0; i < arg_count; i++) {
+      strcat(str, arg_strs[i]);
+      strcat(str, ", ");
+    }
+    strcat(str, "): ");
+    strcat(str, ret_str);
+    return str;
+  }
 };

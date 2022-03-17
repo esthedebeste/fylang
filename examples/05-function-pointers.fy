@@ -9,9 +9,10 @@ fun print_filtered(str: *char, predicate: *fun(char): bool) {
 	while(i < len) {
 		// Access string indexes with *(ptr+offset)
 		let char = str[i]
-		if(predicate(char)) eputc(char) else 0i
+		if(predicate(char)) 
+			eputc(char)
 		i = i + 1
-	} else 0
+	}
 }
 
 fun is_alphanum(ch: char)

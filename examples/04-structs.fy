@@ -11,7 +11,7 @@ fun print_to_stdout(str: *String) {
 		// Access string indexes with ptr[offset]
 		eputc(str.pointer[i])
 		i = i + 1i
-	} else 0i
+	}
 }
 fun main() {
 	// Create a new instance of the String struct (this is a *String)

@@ -3,6 +3,7 @@
 #include <libgen.h>
 #include <malloc.h>
 #include <map>
+#include <math.h>
 #include <memory>
 #include <stdbool.h>
 #include <stdio.h>
@@ -45,8 +46,11 @@ enum Tokens : const int {
   T_SIGNED = -26,    // signed
   T_AS = -27,        // as
   T_VARARG = -28,    // __VARARG__
+  T_TYPEOF = -29,    // typeof
+  T_TRUE = -30,      // true
+  T_FALSE = -31,     // false
 };
-#include "errno.h"
+
 static LLVMContextRef curr_ctx;
 static LLVMBuilderRef curr_builder;
 static LLVMModuleRef curr_module;

@@ -2,7 +2,7 @@ include "std/types"
 // C functions and globals can be used from fy using 'declare'
 declare const stdout: *unknown
 declare fun fputs(str: *char, file: *unknown): int
-fun main(): int {
+fun main() {
 	fputs("Hello World!", stdout)
 	0i
 }

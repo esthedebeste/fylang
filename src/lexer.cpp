@@ -83,41 +83,47 @@ static int next_token() {
   }
   if (isalpha(last_char) || last_char == '_') {
     read_str(&is_alphaish, &identifier_string, &identifier_string_length);
-#define id_str identifier_string
-#define id_len identifier_string_length
-    if (streql(id_str, id_len, "fun", 3))
+#define T_eq(str)                                                              \
+  streql(identifier_string, identifier_string_length, str,                     \
+         sizeof(str) - 1 /* without NUL byte */)
+    if (T_eq("fun"))
       return T_FUNCTION;
-    else if (streql(id_str, id_len, "declare", 7))
+    else if (T_eq("declare"))
       return T_DECLARE;
-    else if (streql(id_str, id_len, "if", 2))
+    else if (T_eq("if"))
       return T_IF;
-    else if (streql(id_str, id_len, "else", 4))
+    else if (T_eq("else"))
       return T_ELSE;
-    else if (streql(id_str, id_len, "let", 3))
+    else if (T_eq("let"))
       return T_LET;
-    else if (streql(id_str, id_len, "const", 5))
+    else if (T_eq("const"))
       return T_CONST;
-    else if (streql(id_str, id_len, "while", 5))
+    else if (T_eq("while"))
       return T_WHILE;
-    else if (streql(id_str, id_len, "struct", 6))
+    else if (T_eq("struct"))
       return T_STRUCT;
-    else if (streql(id_str, id_len, "new", 3))
+    else if (T_eq("new"))
       return T_NEW;
-    else if (streql(id_str, id_len, "include", 7))
+    else if (T_eq("include"))
       return T_INCLUDE;
-    else if (streql(id_str, id_len, "type", 4))
+    else if (T_eq("type"))
       return T_TYPE;
-    else if (streql(id_str, id_len, "unsigned", 8))
+    else if (T_eq("unsigned"))
       return T_UNSIGNED;
-    else if (streql(id_str, id_len, "signed", 6))
+    else if (T_eq("signed"))
       return T_SIGNED;
-    else if (streql(id_str, id_len, "as", 2))
+    else if (T_eq("as"))
       return T_AS;
     // __ because vararg can't be used outside of declarations
-    else if (streql(id_str, id_len, "__VARARG__", 10))
+    else if (T_eq("__VARARG__"))
       return T_VARARG;
-#undef id_str
-#undef id_len
+    else if (T_eq("typeof"))
+      return T_TYPEOF;
+    else if (T_eq("true"))
+      return T_TRUE;
+    else if (T_eq("false"))
+      return T_FALSE;
+#undef T_eq
     return T_IDENTIFIER;
   } else if (isdigit(last_char)) {
     // Number: [0-9]+.?[0-9]*

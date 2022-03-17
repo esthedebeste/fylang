@@ -5,17 +5,14 @@
 #include "utils.cpp"
 static int curr_token;
 static int get_next_token() { return curr_token = next_token(); }
-static int eat(int expected_token, char *exp_name = nullptr) {
+static int eat(const int expected_token, const char *exp_name = nullptr) {
   if (curr_token != expected_token) {
-    char *exp;
-    if (exp_name == nullptr) {
-      exp = alloc_c(2);
-      exp[0] = expected_token;
-      exp[1] = '\0';
-    } else
-      exp = exp_name;
-    fprintf(stderr, "Error: Unexpected token '%c' (%d), expected '%s'",
-            curr_token, curr_token, exp);
+    if (exp_name == nullptr)
+      fprintf(stderr, "Error: Unexpected token '%c' (%d), expected '%c'",
+              curr_token, curr_token, expected_token);
+    else
+      fprintf(stderr, "Error: Unexpected token '%c' (%d), expected '%s'",
+              curr_token, curr_token, exp_name);
     exit(1);
   } else
     return get_next_token();
@@ -95,6 +92,11 @@ static Type *parse_type_unary() {
   // If the current token is not a unary type operator, just parse type
   if (!(curr_token == '&' || curr_token == '*' || curr_token == T_UNSIGNED))
     return parse_num_type();
+  if (curr_token == T_TYPEOF) {
+    eat(T_TYPEOF);
+    auto expr = parse_expr();
+    return expr->get_type();
+  }
   // If this is a unary operator, read it.
   int opc = curr_token;
   get_next_token();
@@ -123,7 +125,7 @@ static Type *parse_type_unary() {
             "use of `signed` type operator without number on right-hand side");
     }
   }
-  return nullptr;
+  error("unknown unary op");
 }
 static Type *parse_type_postfix() {
   Type *prev = parse_type_unary();
@@ -141,7 +143,7 @@ static Type *parse_type_postfix() {
         error("List lengths have to be integers");
       eat(T_NUMBER);
       eat(']');
-      prev = new ArrayType(prev, parse_pos_int(num, num_len, 10));
+      prev = new TupleType(prev, parse_pos_int(num, num_len, 10));
     }
     default:
       return prev;
@@ -183,26 +185,27 @@ static ExprAST *parse_identifier_expr() {
 }
 /// ifexpr ::= 'if' (expression) expression 'else' expression
 static ExprAST *parse_if_expr() {
-  eat(T_IF, (char *)"if");
+  eat(T_IF);
 
   auto cond = parse_paren_expr();
   auto then = parse_expr();
-  // todo: if without else support
-  eat(T_ELSE, (char *)"else");
-  auto elze = parse_expr();
-
+  ExprAST *elze = nullptr;
+  if (curr_token == T_ELSE) {
+    eat(T_ELSE);
+    elze = parse_expr();
+  }
   return new IfExprAST(cond, then, elze);
 }
 /// whileexpr ::= 'while' (expression) expression else expression
 static ExprAST *parse_while_expr() {
-  eat(T_WHILE, (char *)"while");
-
+  eat(T_WHILE);
   auto cond = parse_paren_expr();
   auto then = parse_expr();
-  // todo: while without else support
-  eat(T_ELSE, (char *)"else");
-  auto elze = parse_expr();
-
+  ExprAST *elze = nullptr;
+  if (curr_token == T_ELSE) {
+    eat(T_ELSE);
+    elze = parse_expr();
+  }
   return new WhileExprAST(cond, then, elze);
 }
 /// newexpr ::= 'new' type '{' (identifier '=' expr ',')* '}'
@@ -278,6 +281,12 @@ static LetExprAST *parse_let_expr(bool global = false) {
   return new LetExprAST(id, id_len, type, value, constant, global);
 }
 
+static BoolExprAST *parse_bool_expr() {
+  bool val = curr_token == T_TRUE;
+  eat(curr_token);
+  return new BoolExprAST(val);
+}
+
 /// primary
 ///   ::= identifierexpr
 ///   ::= numberexpr
@@ -308,6 +317,9 @@ static ExprAST *parse_primary() {
     return parse_let_expr();
   case T_NEW:
     return parse_new_expr();
+  case T_TRUE:
+  case T_FALSE:
+    return parse_bool_expr();
   case '{':
     return parse_block();
   }
