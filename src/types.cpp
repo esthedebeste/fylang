@@ -53,7 +53,7 @@ public:
             other->stringify());
   }
 
-  virtual char *stringify() { error("stringify not implemented yet"); }
+  virtual const char *stringify() { error("stringify not implemented yet"); }
 };
 
 class VoidType : public Type {
@@ -61,6 +61,7 @@ public:
   VoidType() {}
   LLVMTypeRef llvm_type() { return void_type; }
   TypeType type_type() { return TypeType::Void; }
+  const char *stringify() { return "void"; }
 };
 
 class NumType : public Type {
@@ -119,7 +120,7 @@ public:
              other_n->is_signed == is_signed;
     return false;
   }
-  char *stringify() {
+  const char *stringify() {
     const char *typ = is_floating ? "float" : is_signed ? "int" : "uint";
     char *str = alloc_c(strlen(typ) + log10(bits));
     strcat(str, typ);
@@ -144,11 +145,11 @@ public:
     return false;
   }
 
-  char *stringify() {
-    char *contains = points_to->stringify();
-    char *str = alloc_c(4 /*strlen("ptr_")*/ + strlen(contains));
-    strcat(str, "ptr_");
-    strcat(str, contains);
+  const char *stringify() {
+    const char *contains = points_to->stringify();
+    char *str = alloc_c(1 /* '*' */ + strlen(contains));
+    str[0] = '*';
+    strcat(str + 1, contains);
     return str;
   }
 };
@@ -167,8 +168,8 @@ public:
     return false;
   }
 
-  char *stringify() {
-    char *contains = elem->stringify();
+  const char *stringify() {
+    const char *contains = elem->stringify();
     unsigned int count_len = log10(count);
     char *str = alloc_c(2 + strlen(contains) + 3 + count_len + 2);
     strcat(str, "( ");
@@ -223,7 +224,7 @@ public:
       return this == other_s;
     return false;
   }
-  char *stringify() { return strdup(name); }
+  const char *stringify() { return name; }
 };
 class FunctionType : public Type {
 public:
@@ -261,15 +262,15 @@ public:
         return false;
     return true;
   };
-  char *stringify() {
-    char **arg_strs = alloc_arr<char *>(arg_count);
+  const char *stringify() {
+    const char **arg_strs = alloc_arr<const char *>(arg_count);
     unsigned int final_len = 7; /* "fun(): " */
     for (unsigned int i = 0; i < arg_count; i++) {
-      char *type = arguments[i]->stringify();
+      const char *type = arguments[i]->stringify();
       arg_strs[i] = type;
       final_len += strlen(type) + 2 /*", "*/;
     }
-    char *ret_str = return_type->stringify();
+    const char *ret_str = return_type->stringify();
     final_len += strlen(ret_str);
     char *str = alloc_c(final_len);
     strcat(str, "fun(");

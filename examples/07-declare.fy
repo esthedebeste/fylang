@@ -4,7 +4,7 @@ declare const stdout: *unknown
 declare fun fputs(str: *char, file: *unknown): int
 fun main() {
 	fputs("Hello World!", stdout)
-	0i
+	0
 }
 
 // most C functions are declared in c/[c-header-name].

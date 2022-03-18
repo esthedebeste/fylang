@@ -94,15 +94,15 @@ public:
 
 class CastExprAST : public ExprAST {
   ExprAST *value;
-  Type *cast_from;
-  Type *cast_to;
+  Type *from;
+  Type *to;
 
 public:
-  CastExprAST(ExprAST *value, Type *cast_to) : value(value), cast_to(cast_to) {
-    cast_from = value->get_type();
+  CastExprAST(ExprAST *value, Type *to) : value(value), to(to) {
+    from = value->get_type();
   }
-  Value *gen_value() { return new CastValue(value->gen_value(), cast_to); }
-  Type *get_type() { return cast_to; }
+  Value *gen_value() { return value->gen_value()->cast_to(to); }
+  Type *get_type() { return to; }
 };
 
 /// VariableExprAST - Expression class for referencing a variable, like "a".
@@ -173,8 +173,7 @@ public:
     curr_named_variables[std::string(id, id_len)] =
         new BasicLoadValue(ptr, type);
     if (value) {
-      LLVMValueRef llvm_val =
-          (new CastValue(value->gen_value(), type))->gen_load();
+      LLVMValueRef llvm_val = value->gen_value()->cast_to(type)->gen_load();
       LLVMBuildStore(curr_builder, llvm_val, ptr);
     }
     return new BasicLoadValue(ptr, type);
@@ -396,8 +395,7 @@ public:
 
   Value *gen_assign() {
     LLVMValueRef store_ptr = LHS->gen_value()->gen_ptr();
-    Value *val = RHS->gen_value();
-    val = new CastValue(val, LHS->get_type());
+    Value *val = RHS->gen_value()->cast_to(LHS->get_type());
     LLVMBuildStore(curr_builder, val->gen_load(), store_ptr);
     return new BasicLoadValue(store_ptr, type);
   }
@@ -513,8 +511,8 @@ public:
     LLVMValueRef *arg_vs = alloc_arr<LLVMValueRef>(args_len);
     for (unsigned i = 0; i < args_len; i++) {
       if (i < func_t->arg_count)
-        arg_vs[i] = (new CastValue(args[i]->gen_value(), func_t->arguments[i]))
-                        ->gen_load();
+        arg_vs[i] =
+            args[i]->gen_value()->cast_to(func_t->arguments[i])->gen_load();
       else
         arg_vs[i] = args[i]->gen_value()->gen_load();
     }
@@ -567,11 +565,11 @@ class PropAccessExprAST : public ExprAST {
   Type *type;
 
 public:
-  PropAccessExprAST(char *key, unsigned int key_len, ExprAST *source)
+  PropAccessExprAST(char *key, unsigned int name_len, ExprAST *source)
       : key(key), source(source) {
     source_type = dynamic_cast<StructType *>(
         dynamic_cast<PointerType *>(source->get_type())->get_points_to());
-    index = source_type->get_index(key, key_len);
+    index = source_type->get_index(key, name_len);
     type = source_type->get_elem_type(index);
   }
 
@@ -583,6 +581,42 @@ public:
                             source->gen_value()->gen_load(), index, key),
         type);
   }
+};
+
+struct CompleteExtensionName {
+  char *str;
+  unsigned int len;
+};
+CompleteExtensionName get_complete_extension_name(Type *base_type, char *name,
+                                                  unsigned int name_len) {
+  const char *called_type = base_type->stringify();
+  CompleteExtensionName cen;
+  cen.len = 4 + strlen(called_type) + name_len;
+  cen.str = alloc_c(cen.len);
+  strcpy(cen.str, "(");
+  strcat(cen.str, called_type);
+  strcat(cen.str, ")::");
+  strcat(cen.str, name);
+  return cen;
+}
+/// MethodCallExprAST - Expression class for calling methods (a.len()).
+class MethodCallExprAST : public ExprAST {
+  CallExprAST *underlying_call;
+
+public:
+  MethodCallExprAST(char *name, unsigned int name_len, ExprAST *source,
+                    ExprAST **args, unsigned int args_len) {
+    CompleteExtensionName cen =
+        get_complete_extension_name(source->get_type(), name, name_len);
+    VariableExprAST *called_function = new VariableExprAST(cen.str, cen.len);
+    ExprAST **args_with_this = realloc_arr<ExprAST *>(args, args_len + 1);
+    args_with_this[args_len] = source;
+    underlying_call =
+        new CallExprAST(called_function, args_with_this, args_len + 1);
+  }
+
+  Type *get_type() { return underlying_call->get_type(); }
+  Value *gen_value() { return underlying_call->gen_value(); }
 };
 
 /// NewExprAST - Expression class for creating an instance of a struct (new
@@ -788,14 +822,24 @@ public:
     curr_named_var_types[std::string(name, name_len)] = type =
         new FunctionType(return_type, arg_types, arg_count, vararg);
   }
+  PrototypeAST(Type *this_type, char *name, unsigned int name_len,
+               char **arg_names, unsigned int *arg_name_lengths,
+               Type **arg_types, unsigned int arg_count, Type *return_type,
+               bool vararg) {
+    CompleteExtensionName cen =
+        get_complete_extension_name(this_type, name, name_len);
+    arg_count++;
+    arg_names = realloc_arr<char *>(arg_names, arg_count);
+    arg_names[arg_count - 1] = strdup("this");
+    arg_name_lengths = realloc_arr<unsigned int>(arg_name_lengths, arg_count);
+    arg_name_lengths[arg_count - 1] = 4;
+    arg_types = realloc_arr<Type *>(arg_types, arg_count);
+    arg_types[arg_count - 1] = this_type;
+    new (this) PrototypeAST(cen.str, cen.len, arg_names, arg_name_lengths,
+                            arg_types, arg_count, return_type, vararg);
+  }
   FunctionType *get_type() { return type; }
   LLVMValueRef codegen() {
-    // Make the function type:  double(double,double) etc.
-    LLVMTypeRef *llvm_arg_types = alloc_arr<LLVMTypeRef>(arg_count);
-    for (unsigned i = 0; i != arg_count; ++i) {
-      llvm_arg_types[i] = arg_types[i]->llvm_type();
-    }
-
     LLVMValueRef func = LLVMAddFunction(curr_module, name, type->llvm_type());
     curr_named_variables[std::string(name, name_len)] =
         new ConstValue(type, func, func);
@@ -877,7 +921,7 @@ public:
     for (unsigned i = 0; i != args_len; ++i)
       curr_named_variables[LLVMGetValueName2(params[i], &unused)] =
           new ConstValue(proto->arg_types[i], params[i], nullptr);
-    Value *ret_val = new CastValue(body->gen_value(), proto->type->return_type);
+    Value *ret_val = body->gen_value()->cast_to(proto->type->return_type);
     // Finish off the function.
     LLVMBuildRet(curr_builder, ret_val->gen_load());
     // doesnt exist in c api (i think)

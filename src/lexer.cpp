@@ -41,7 +41,7 @@ static void read_str(bool (*predicate)(char), char **output,
 static bool is_numish(char c) {
   if (c == '.') {
     if (num_has_dot)
-      error("number can't have multiple .s");
+      return false;
     num_has_dot = true;
     return true;
   }
@@ -137,9 +137,9 @@ static int next_token() {
       // if floating-point, default to double (float64)
       if (num_has_dot)
         num_type = 'd';
-      // if not floating-point, default to long (int64)
+      // if not floating-point, default to int (int32)
       else
-        num_type = 'l';
+        num_type = 'i';
     }
     return T_NUMBER;
   } else if (last_char == '"') {

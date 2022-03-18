@@ -7,6 +7,7 @@ public:
   virtual Type *get_type() = 0;
   virtual LLVMValueRef gen_load() = 0;
   virtual LLVMValueRef gen_ptr() = 0;
+  Value *cast_to(Type *type);
 };
 /// ConstValue - For when everything always returns the same thing.
 class ConstValue : public Value {
@@ -133,3 +134,4 @@ public:
                 new PointerType(source->get_type()));
   }
 };
+Value *Value::cast_to(Type *to) { return new CastValue(this, to); }

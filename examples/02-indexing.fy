@@ -5,5 +5,5 @@ fun main() {
 	str[0] = 'H'
 	str[6] = 'W'
 	eputs(str) // "Hello World!"
-	0i
+	0
 }

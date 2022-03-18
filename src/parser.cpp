@@ -330,6 +330,29 @@ static int get_token_precedence() {
     return -1;
   return t_prec;
 }
+
+struct ParseCallResult {
+  ExprAST **args;
+  unsigned int args_len = 0;
+};
+static ParseCallResult parse_call() {
+  eat('(');
+  ParseCallResult res;
+  res.args = alloc_arr<ExprAST *>(64);
+  res.args_len = 0;
+  if (curr_token != ')') {
+    while (1) {
+      res.args[res.args_len++] = parse_expr();
+      if (curr_token == ')')
+        break;
+      if (curr_token != ',')
+        error("Expected ')' or ',' in argument list");
+      get_next_token();
+    }
+  }
+  eat(')');
+  return res;
+}
 /// unary
 ///   ::= primary
 ///   ::= '.' identifier
@@ -344,29 +367,18 @@ static ExprAST *parse_postfix() {
       char *id = identifier_string;
       unsigned int id_len = identifier_string_length;
       eat(T_IDENTIFIER, (char *)"identifier");
-      prev = new PropAccessExprAST(id, id_len, prev);
+      if (curr_token == '(') {
+        ParseCallResult call = parse_call();
+        prev =
+            new MethodCallExprAST(id, id_len, prev, call.args, call.args_len);
+      } else
+        prev = new PropAccessExprAST(id, id_len, prev);
       break;
     }
     case '(': {
       // function call
-      eat('(');
-      ExprAST **args = alloc_arr<ExprAST *>(64);
-      unsigned int args_len = 0;
-      if (curr_token != ')') {
-        while (1) {
-          if (auto arg = parse_expr())
-            args[args_len++] = arg;
-          else
-            return nullptr;
-          if (curr_token == ')')
-            break;
-          if (curr_token != ',')
-            error("Expected ')' or ',' in argument list");
-          get_next_token();
-        }
-      }
-      eat(')');
-      prev = new CallExprAST(prev, args, args_len);
+      ParseCallResult call = parse_call();
+      prev = new CallExprAST(prev, call.args, call.args_len);
       break;
     }
     case '[': {
@@ -439,16 +451,19 @@ static ExprAST *parse_expr() {
 }
 /// prototype
 ///   ::= id '(' id* ')'
+///   ::= '(' type ')' id '(' id* ')'
 static PrototypeAST *parse_prototype(Type *default_return_type = nullptr) {
+  Type *this_t = nullptr;
+  if (curr_token == '(') {
+    // type method
+    eat('(');
+    this_t = parse_type_unary();
+    eat(')');
+  }
   char *fn_name = identifier_string;
   unsigned int fn_name_len = identifier_string_length;
   eat(T_IDENTIFIER, (char *)"identifier");
-
-  if (curr_token != '(') {
-    fprintf(stderr, "Error: Unexpected token '%c' (%d), expected '%c'",
-            curr_token, curr_token, '(');
-    exit(1);
-  }
+  eat('(');
 
   // Read the list of argument names.
   char **arg_names = alloc_arr<char *>(64);
@@ -457,7 +472,6 @@ static PrototypeAST *parse_prototype(Type *default_return_type = nullptr) {
   unsigned int arg_count = 0;
   bool vararg = false;
 
-  get_next_token();
   if (curr_token != ')')
     while (1) {
       if (curr_token == T_VARARG) {
@@ -485,8 +499,13 @@ static PrototypeAST *parse_prototype(Type *default_return_type = nullptr) {
   } else
     return_type = default_return_type;
 
-  return new PrototypeAST(fn_name, fn_name_len, arg_names, arg_name_lens,
-                          arg_types, arg_count, return_type, vararg);
+  if (this_t)
+    return new PrototypeAST(this_t, fn_name, fn_name_len, arg_names,
+                            arg_name_lens, arg_types, arg_count, return_type,
+                            vararg);
+  else
+    return new PrototypeAST(fn_name, fn_name_len, arg_names, arg_name_lens,
+                            arg_types, arg_count, return_type, vararg);
 }
 
 /// definition ::= 'fun' prototype expression
@@ -503,7 +522,7 @@ static FunctionAST *parse_definition() {
 static DeclareExprAST *parse_declare() {
   eat(T_DECLARE, (char *)"declare"); // eat declare.
   if (curr_token == T_FUNCTION) {
-    get_next_token();
+    eat(T_FUNCTION);
     PrototypeAST *proto = parse_prototype(new NumType(32, false, true));
     return new DeclareExprAST(proto);
   } else if (curr_token == T_CONST || curr_token == T_LET) {
