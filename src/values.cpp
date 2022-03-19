@@ -38,7 +38,7 @@ public:
       : variable(variable), type(type) {}
   Type *get_type() { return type; }
   LLVMValueRef gen_load() {
-    return LLVMBuildLoad2(curr_builder, type->llvm_type(), variable, "");
+    return LLVMBuildLoad2(curr_builder, type->llvm_type(), variable, UN);
   };
   LLVMValueRef gen_ptr() { return variable; };
 };
@@ -56,14 +56,14 @@ public:
   }
   Type *get_type() { return type; }
   LLVMValueRef gen_load() {
-    LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), "");
+    LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), UN);
     LLVMValueRef incoming_v[2] = {a_v->gen_load(), b_v->gen_load()};
     LLVMBasicBlockRef incoming_bb[2] = {a_bb, b_bb};
     LLVMAddIncoming(phi, incoming_v, incoming_bb, 2);
     return phi;
   }
   LLVMValueRef gen_ptr() {
-    LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), "");
+    LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), UN);
     LLVMValueRef incoming_v[2] = {a_v->gen_ptr(), b_v->gen_ptr()};
     LLVMBasicBlockRef incoming_bb[2] = {a_bb, b_bb};
     LLVMAddIncoming(phi, incoming_v, incoming_bb, 2);
@@ -75,21 +75,21 @@ LLVMValueRef gen_num_cast(LLVMValueRef value, NumType *a, Type *b) {
   if (NumType *num = dynamic_cast<NumType *>(b)) {
     if (!num->is_floating && a->is_floating)
       return LLVMBuildCast(curr_builder, a->is_signed ? LLVMFPToSI : LLVMFPToUI,
-                           value, b->llvm_type(), "");
+                           value, b->llvm_type(), UN);
     if (num->is_floating && !a->is_floating)
       return LLVMBuildCast(curr_builder, a->is_signed ? LLVMSIToFP : LLVMUIToFP,
-                           value, b->llvm_type(), "");
+                           value, b->llvm_type(), UN);
     if (a->is_floating)
-      return LLVMBuildFPCast(curr_builder, value, num->llvm_type(), "");
+      return LLVMBuildFPCast(curr_builder, value, num->llvm_type(), UN);
     return LLVMBuildIntCast2(curr_builder, value, num->llvm_type(),
-                             a->is_signed, "");
+                             num->is_signed, UN);
   }
   error("Numbers can't be casted to non-numbers yet");
 }
 
 LLVMValueRef gen_ptr_cast(LLVMValueRef value, PointerType *a, Type *b) {
   if (PointerType *ptr = dynamic_cast<PointerType *>(b))
-    return LLVMBuildPointerCast(curr_builder, value, ptr->llvm_type(), "");
+    return LLVMBuildPointerCast(curr_builder, value, ptr->llvm_type(), UN);
   error("Pointers can't be casted to non-pointers yet");
 }
 
@@ -104,7 +104,7 @@ LLVMValueRef gen_arr_cast(LLVMValueRef value, TupleType *a, Type *b) {
         LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false)};
     // cast [ ... x T ]* to T*
     LLVMValueRef cast =
-        LLVMBuildGEP2(curr_builder, a->llvm_type(), value, zeros, 2, "");
+        LLVMBuildGEP2(curr_builder, a->llvm_type(), value, zeros, 2, UN);
     return cast;
   }
   error("Arrays can't be casted to non-pointers yet");

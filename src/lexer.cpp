@@ -83,9 +83,7 @@ static int next_token() {
   }
   if (isalpha(last_char) || last_char == '_') {
     read_str(&is_alphaish, &identifier_string, &identifier_string_length);
-#define T_eq(str)                                                              \
-  streql(identifier_string, identifier_string_length, str,                     \
-         sizeof(str) - 1 /* without NUL byte */)
+#define T_eq(str) streq_lit(identifier_string, identifier_string_length, str)
     if (T_eq("fun"))
       return T_FUNCTION;
     else if (T_eq("declare"))
@@ -123,6 +121,8 @@ static int next_token() {
       return T_TRUE;
     else if (T_eq("false"))
       return T_FALSE;
+    else if (T_eq("return"))
+      return T_RETURN;
 #undef T_eq
     return T_IDENTIFIER;
   } else if (isdigit(last_char)) {

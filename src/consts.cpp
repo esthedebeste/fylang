@@ -16,6 +16,7 @@ extern "C" {
 #include "llvm-c/Transforms/PassBuilder.h"
 }
 
+bool DEBUG = false;
 char *std_dir;
 enum Tokens : const int {
   T_EOF = -1,        // end of file

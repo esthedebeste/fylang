@@ -2,25 +2,31 @@
 
 #include "parser.cpp"
 #include "ucr.cpp"
-bool DEBUG = false;
 static void handle_definition() {
   auto ast = parse_definition();
   if (DEBUG)
-    fprintf(stderr, "Parsed a function definition.\n");
-  ast->gen_toplevel();
+    fprintf(stderr, "Parsed a function definition (name: %s).\n",
+            ast->proto->name);
+  auto val = ast->gen_toplevel();
+  if (DEBUG)
+    LLVMDumpValue(val);
 }
 
 static void handle_declare() {
   auto ast = parse_declare();
   if (DEBUG)
     fprintf(stderr, "Parsed a declare\n");
-  ast->gen_toplevel();
+  auto val = ast->gen_toplevel();
+  if (DEBUG)
+    LLVMDumpValue(val);
 }
 static void handle_global_let() {
   auto ast = parse_let_expr(true);
   if (DEBUG)
     fprintf(stderr, "Parsed a global variable\n");
-  ast->gen_toplevel();
+  auto val = ast->gen_toplevel();
+  if (DEBUG)
+    LLVMDumpValue(val);
 }
 static void handle_global_struct() {
   auto ast = parse_struct();
@@ -86,7 +92,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  if (getenv("FY_DEBUG"))
+  if (getenv("DEBUG"))
     DEBUG = true;
   std_dir = get_relative_path(argv[0], (char *)"../lib");
   // host machine triple

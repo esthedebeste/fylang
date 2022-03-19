@@ -77,7 +77,7 @@ public:
   NumType(char *bits_str, unsigned int bits_str_len, bool is_floating,
           bool is_signed)
       : is_floating(is_floating), is_signed(is_signed) {
-    if (streql(bits_str, bits_str_len, "_ptrsize", 8))
+    if (streq_lit(bits_str, bits_str_len, "_ptrsize"))
       bits = LLVMPointerSize(target_data) * 8;
     else
       bits = parse_pos_int(bits_str, bits_str_len, 10);

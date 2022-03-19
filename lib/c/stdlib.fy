@@ -18,6 +18,7 @@ declare fun calloc(nmemb: size_t, size: size_t): *void
 declare fun free(ptr: *void): void
 declare fun malloc(size: size_t): *void
 declare fun realloc(ptr: *void, size: size_t): *void
+declare fun reallocarray(ptr: *void, nmemb: size_t, size: size_t): *void
 
 declare fun atof(nptr: *char): double
 declare fun atoi(nptr: *char): int

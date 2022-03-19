@@ -54,26 +54,26 @@ static Type *parse_num_type() {
   char *id = identifier_string;
   unsigned int id_len = identifier_string_length;
   eat(T_IDENTIFIER, (char *)"identifier");
-  // starts with "int"
-  if (id_len >= 3 && streql(id, 3, "int", 3))
-    if (id_len > 3)
-      return new NumType(id + 3, id_len - 3, false, true);
-    else
-      return new NumType(32, false, true);
-  // starts with "float"
-  else if (id_len >= 5 && streql(id, 5, "float", 5))
-    if (id_len > 5)
-      return new NumType(id + 5, id_len - 5, true, true);
-    else
-      return new NumType(32, true, true);
-  else if (streql(id, id_len, "void", 4))
-    return new VoidType();
-  else if (curr_named_types[std::string(id, id_len)])
-    return curr_named_types[std::string(id, id_len)];
+#define strlen(str) (sizeof(str) - 1)
+#define check_type(str, is_floating, is_signed)                                \
+  if (id_len >= strlen(str) && streql(id, strlen(str), str, strlen(str)))      \
+    if (id_len > strlen(str))                                                  \
+      return new NumType(id + strlen(str), id_len - strlen(str), is_floating,  \
+                         is_signed);                                           \
+    else                                                                       \
+      return new NumType(32, is_floating, is_signed)
+  check_type("uint", false, false);
+  else check_type("int", false, true);
+  else check_type("float", true, true);
+  else if (streq_lit(id, id_len, "void")) return new VoidType();
+  else if (curr_named_types[std::string(
+               id, id_len)]) return curr_named_types[std::string(id, id_len)];
   else {
     fprintf(stderr, "Error: invalid type '%s'", id);
     exit(1);
   }
+#undef strlen
+#undef check_type
 }
 
 static TypeDefAST *parse_type_definition() {
@@ -89,14 +89,14 @@ static TypeDefAST *parse_type_definition() {
 static Type *parse_type_unary() {
   if (curr_token == T_FUNCTION)
     return parse_function_type();
-  // If the current token is not a unary type operator, just parse type
-  if (!(curr_token == '&' || curr_token == '*' || curr_token == T_UNSIGNED))
-    return parse_num_type();
   if (curr_token == T_TYPEOF) {
     eat(T_TYPEOF);
     auto expr = parse_expr();
     return expr->get_type();
   }
+  // If the current token is not a unary type operator, just parse type
+  if (!(curr_token == '&' || curr_token == '*' || curr_token == T_UNSIGNED))
+    return parse_num_type();
   // If this is a unary operator, read it.
   int opc = curr_token;
   get_next_token();
@@ -403,8 +403,8 @@ static ExprAST *parse_postfix() {
 ///   ::= '!' unary
 static ExprAST *parse_unary() {
   // If the current token is not an operator, it must be a primary expr.
-  if (!isascii(curr_token) || curr_token == '(' || curr_token == ',' ||
-      curr_token == '{')
+  if (curr_token != T_RETURN && !isascii(curr_token) || curr_token == '(' ||
+      curr_token == ',' || curr_token == '{')
     return parse_postfix();
 
   // If this is a unary operator, read it.

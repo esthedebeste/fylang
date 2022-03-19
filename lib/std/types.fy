@@ -3,7 +3,7 @@ type half = float16
 type double = float64
 type byte = int8
 type char = int8
-type bool = int1
+type bool = uint1
 
 // type shortest = int1
 // type shorter = int8

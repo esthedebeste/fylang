@@ -10,7 +10,7 @@ static std::map<std::string, Type *> curr_named_types;
 
 class TopLevelAST {
 public:
-  virtual void gen_toplevel() = 0;
+  virtual LLVMValueRef gen_toplevel() = 0;
 };
 /// ExprAST - Base class for all expression nodes.
 class ExprAST {
@@ -59,6 +59,11 @@ public:
                 unsigned int base)
       : val(val), val_len(val_len), base(base) {
     type = num_char_to_type(type_char, has_dot);
+  }
+  NumberExprAST(int val, char type_char) : base(10) {
+    type = num_char_to_type(type_char, false);
+    this->val = num_to_str(val);
+    this->val_len = log10(val) + 1;
   }
   Type *get_type() { return type; }
   Value *gen_value() {
@@ -149,7 +154,7 @@ public:
     this->value = value;
   }
   Type *get_type() { return type; }
-  void gen_toplevel() {
+  LLVMValueRef gen_toplevel() {
     LLVMValueRef ptr = LLVMAddGlobal(curr_module, type->llvm_type(), id);
     if (value) {
       Value *val = value->gen_value();
@@ -160,6 +165,7 @@ public:
     }
     curr_named_variables[std::string(id, id_len)] =
         new BasicLoadValue(ptr, type);
+    return ptr;
   }
   Value *gen_value() {
     if (constant) {
@@ -263,33 +269,33 @@ LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
   if (floating)
     switch (op) {
     case '+':
-      return LLVMBuildFAdd(curr_builder, L, R, "");
+      return LLVMBuildFAdd(curr_builder, L, R, UN);
     case '-':
-      return LLVMBuildFSub(curr_builder, L, R, "");
+      return LLVMBuildFSub(curr_builder, L, R, UN);
     case '*':
-      return LLVMBuildFMul(curr_builder, L, R, "");
+      return LLVMBuildFMul(curr_builder, L, R, UN);
     case '/':
-      return LLVMBuildFDiv(curr_builder, L, R, "");
+      return LLVMBuildFDiv(curr_builder, L, R, UN);
     case '%':
-      return LLVMBuildFRem(curr_builder, L, R, "");
+      return LLVMBuildFRem(curr_builder, L, R, UN);
     case T_LAND:
     case '&':
-      return LLVMBuildAnd(curr_builder, L, R, "");
+      return LLVMBuildAnd(curr_builder, L, R, UN);
     case T_LOR:
     case '|':
-      return LLVMBuildOr(curr_builder, L, R, "");
+      return LLVMBuildOr(curr_builder, L, R, UN);
     case '<':
-      return LLVMBuildFCmp(curr_builder, LLVMRealULT, L, R, "");
+      return LLVMBuildFCmp(curr_builder, LLVMRealULT, L, R, UN);
     case '>':
-      return LLVMBuildFCmp(curr_builder, LLVMRealUGT, L, R, "");
+      return LLVMBuildFCmp(curr_builder, LLVMRealUGT, L, R, UN);
     case T_LEQ:
-      return LLVMBuildFCmp(curr_builder, LLVMRealULE, L, R, "");
+      return LLVMBuildFCmp(curr_builder, LLVMRealULE, L, R, UN);
     case T_GEQ:
-      return LLVMBuildFCmp(curr_builder, LLVMRealUGE, L, R, "");
+      return LLVMBuildFCmp(curr_builder, LLVMRealUGE, L, R, UN);
     case T_EQEQ:
-      return LLVMBuildFCmp(curr_builder, LLVMRealUEQ, L, R, "");
+      return LLVMBuildFCmp(curr_builder, LLVMRealUEQ, L, R, UN);
     case T_NEQ:
-      return LLVMBuildFCmp(curr_builder, LLVMRealUNE, L, R, "");
+      return LLVMBuildFCmp(curr_builder, LLVMRealUNE, L, R, UN);
     default:
       fprintf(stderr, "Error: invalid float_float binary operator '%c'", op);
       exit(1);
@@ -298,39 +304,39 @@ LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
     bool is_signed = lhs_nt->is_signed && rhs_nt->is_signed;
     switch (op) {
     case '+':
-      return LLVMBuildAdd(curr_builder, L, R, "");
+      return LLVMBuildAdd(curr_builder, L, R, UN);
     case '-':
-      return LLVMBuildSub(curr_builder, L, R, "");
+      return LLVMBuildSub(curr_builder, L, R, UN);
     case '*':
-      return LLVMBuildMul(curr_builder, L, R, "");
+      return LLVMBuildMul(curr_builder, L, R, UN);
     case '/':
-      return is_signed ? LLVMBuildSDiv(curr_builder, L, R, "")
-                       : LLVMBuildUDiv(curr_builder, L, R, "");
+      return is_signed ? LLVMBuildSDiv(curr_builder, L, R, UN)
+                       : LLVMBuildUDiv(curr_builder, L, R, UN);
     case '%':
-      return is_signed ? LLVMBuildSRem(curr_builder, L, R, "")
-                       : LLVMBuildURem(curr_builder, L, R, "");
+      return is_signed ? LLVMBuildSRem(curr_builder, L, R, UN)
+                       : LLVMBuildURem(curr_builder, L, R, UN);
     case T_LAND:
     case '&':
-      return LLVMBuildAnd(curr_builder, L, R, "");
+      return LLVMBuildAnd(curr_builder, L, R, UN);
     case T_LOR:
     case '|':
-      return LLVMBuildOr(curr_builder, L, R, "");
+      return LLVMBuildOr(curr_builder, L, R, UN);
     case '<':
       return LLVMBuildICmp(curr_builder, is_signed ? LLVMIntSLT : LLVMIntULT, L,
-                           R, "");
+                           R, UN);
     case '>':
       return LLVMBuildICmp(curr_builder, is_signed ? LLVMIntSGT : LLVMIntUGT, L,
-                           R, "");
+                           R, UN);
     case T_LEQ:
       return LLVMBuildICmp(curr_builder, is_signed ? LLVMIntSLE : LLVMIntULE, L,
-                           R, "");
+                           R, UN);
     case T_GEQ:
       return LLVMBuildICmp(curr_builder, is_signed ? LLVMIntSGE : LLVMIntUGE, L,
-                           R, "");
+                           R, UN);
     case T_EQEQ:
-      return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntEQ, L, R, "");
+      return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntEQ, L, R, UN);
     case T_NEQ:
-      return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntNE, L, R, "");
+      return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntNE, L, R, UN);
     default:
       fprintf(stderr, "Error: invalid int_int binary operator '%c'", op);
       exit(1);
@@ -348,7 +354,7 @@ LLVMValueRef gen_ptr_num_binop(int op, LLVMValueRef ptr, LLVMValueRef num,
     num = LLVMBuildSub(
         curr_builder,
         LLVMConstInt((new NumType(32, false, false))->llvm_type(), 0, false),
-        num, "");
+        num, UN);
     /* falls through */
   case '+':
     return LLVMBuildGEP2(curr_builder, ptr_t->points_to->llvm_type(), ptr, &num,
@@ -424,12 +430,12 @@ public:
 };
 /// UnaryExprAST - Expression class for a unary operator.
 class UnaryExprAST : public ExprAST {
-  char op;
+  int op;
   ExprAST *operand;
   Type *type;
 
 public:
-  UnaryExprAST(char op, ExprAST *operand) : op(op), operand(operand) {
+  UnaryExprAST(int op, ExprAST *operand) : op(op), operand(operand) {
     if (op == '*')
       if (PointerType *opt = dynamic_cast<PointerType *>(operand->get_type()))
         type = opt->get_points_to();
@@ -451,19 +457,22 @@ public:
       return new ConstValue(
           type,
           LLVMBuildFCmp(curr_builder, LLVMRealONE, val->gen_load(),
-                        LLVMConstReal(float_64_type, 1.0), ""),
+                        LLVMConstReal(float_64_type, 1.0), UN),
           nullptr);
     case '-':
       // shortcut for 0-n
       return new ConstValue(type,
                             LLVMBuildFSub(curr_builder,
                                           LLVMConstReal(float_64_type, 0.0),
-                                          val->gen_load(), ""),
+                                          val->gen_load(), UN),
                             nullptr);
     case '*':
       return new BasicLoadValue(val->gen_load(), type);
     case '&':
       return new ConstValue(type, val->gen_ptr(), nullptr);
+    case T_RETURN:
+      LLVMBuildRet(curr_builder, val->gen_load());
+      return val;
     default:
       fprintf(stderr, "Error: invalid prefix unary operator '%c'", op);
       exit(1);
@@ -518,7 +527,7 @@ public:
     }
     return new ConstValue(func_t->return_type,
                           LLVMBuildCall2(curr_builder, func_t->llvm_type(),
-                                         func, arg_vs, args_len, ""),
+                                         func, arg_vs, args_len, UN),
                           nullptr);
   }
 };
@@ -642,8 +651,14 @@ public:
   Type *get_type() { return p_type; }
 
   Value *gen_value() {
-    LLVMValueRef ptr =
-        LLVMBuildAlloca(curr_builder, s_type->llvm_type(), "newalloc");
+    LLVMValueRef func = LLVMGetNamedFunction(curr_module, "malloc");
+    if (!func)
+      error("malloc needs to be declared to use `new`");
+    LLVMValueRef bytes = LLVMSizeOf(s_type->llvm_type());
+    LLVMValueRef ptr = LLVMBuildCall2(
+        curr_builder, curr_named_var_types["malloc"]->llvm_type(), func, &bytes,
+        1, UN);
+    ptr = LLVMBuildBitCast(curr_builder, ptr, p_type->llvm_type(), "newalloc");
     for (unsigned int i = 0; i < key_count; i++) {
       LLVMValueRef llvm_indexes[2] = {
           LLVMConstInt(LLVMInt32Type(), 0, false),
@@ -704,7 +719,7 @@ public:
     Type *else_t = elze->get_type();
     if (then_t->neq(else_t)) {
       fprintf(stderr,
-              "Error: while's then and else side don't have the same type, ");
+              "Error: if's then and else side don't have the same type, ");
       then_t->log_diff(else_t);
       fprintf(stderr, ".\n");
       exit(1);
@@ -723,11 +738,9 @@ public:
     LLVMValueRef func =
         LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder));
     LLVMBasicBlockRef then_bb =
-        LLVMAppendBasicBlockInContext(curr_ctx, func, "ifthen");
-    LLVMBasicBlockRef else_bb =
-        LLVMCreateBasicBlockInContext(curr_ctx, "ifelse");
-    LLVMBasicBlockRef merge_bb =
-        LLVMCreateBasicBlockInContext(curr_ctx, "ifmerge");
+        LLVMAppendBasicBlockInContext(curr_ctx, func, UN);
+    LLVMBasicBlockRef else_bb = LLVMCreateBasicBlockInContext(curr_ctx, UN);
+    LLVMBasicBlockRef merge_bb = LLVMCreateBasicBlockInContext(curr_ctx, UN);
     // if
     LLVMBuildCondBr(curr_builder, cond_v, then_bb, else_bb);
     // then
@@ -761,15 +774,13 @@ public:
     if (NumType *n = dynamic_cast<NumType *>(cond->get_type()))
       if (n->is_floating)
         cond_v = LLVMBuildFCmp(curr_builder, LLVMRealONE, cond_v,
-                               LLVMConstReal(float_64_type, 0.0), "whilecond");
+                               LLVMConstReal(float_64_type, 0.0), UN);
     LLVMValueRef func =
         LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder));
     LLVMBasicBlockRef then_bb =
-        LLVMAppendBasicBlockInContext(curr_ctx, func, "whilethen");
-    LLVMBasicBlockRef else_bb =
-        LLVMCreateBasicBlockInContext(curr_ctx, "whileelse");
-    LLVMBasicBlockRef merge_bb =
-        LLVMCreateBasicBlockInContext(curr_ctx, "endwhile");
+        LLVMAppendBasicBlockInContext(curr_ctx, func, UN);
+    LLVMBasicBlockRef else_bb = LLVMCreateBasicBlockInContext(curr_ctx, UN);
+    LLVMBasicBlockRef merge_bb = LLVMCreateBasicBlockInContext(curr_ctx, UN);
     // while
     LLVMBuildCondBr(curr_builder, cond_v, then_bb, else_bb);
     // then
@@ -779,7 +790,7 @@ public:
     if (NumType *n = dynamic_cast<NumType *>(cond->get_type()))
       if (n->is_floating)
         cond_v2 = LLVMBuildFCmp(curr_builder, LLVMRealONE, cond_v,
-                                LLVMConstReal(float_64_type, 0.0), "whilecond");
+                                LLVMConstReal(float_64_type, 0.0), UN);
     LLVMBuildCondBr(curr_builder, cond_v2, then_bb, merge_bb);
     // Codegen of 'then' can change the current block, update then_bb for the
     // PHI.
@@ -875,21 +886,21 @@ public:
     else
       curr_named_var_types[std::string(let->id, let->id_len)] = type;
   }
-  void gen_toplevel() {
+  LLVMValueRef gen_toplevel() {
     register_declare();
     if (let)
-      let->gen_declare();
+      return let->gen_declare();
     else
-      prot->codegen();
+      return prot->codegen();
   }
 };
 
 /// FunctionAST - This class represents a function definition itself.
 class FunctionAST : public TopLevelAST {
-  PrototypeAST *proto;
   ExprAST *body;
 
 public:
+  PrototypeAST *proto;
   FunctionAST(PrototypeAST *proto, ExprAST *body) {
     if (proto->type->return_type == nullptr)
       proto->type->return_type = body->get_type();
@@ -897,7 +908,7 @@ public:
     this->body = body;
   }
 
-  void gen_toplevel() {
+  LLVMValueRef gen_toplevel() {
     // First, check for an existing function from a previous 'declare'
     // declaration.
     LLVMValueRef func = LLVMGetNamedFunction(curr_module, proto->name);
@@ -911,9 +922,8 @@ public:
     if (LLVMCountBasicBlocks(func) != 0)
       error("Function cannot be redefined.");
 
-    auto block = LLVMAppendBasicBlockInContext(curr_ctx, func, "");
+    auto block = LLVMAppendBasicBlockInContext(curr_ctx, func, UN);
     LLVMPositionBuilderAtEnd(curr_builder, block);
-
     unsigned int args_len = LLVMCountParams(func);
     LLVMValueRef *params = alloc_arr<LLVMValueRef>(args_len);
     LLVMGetParams(func, params);
@@ -924,6 +934,8 @@ public:
     Value *ret_val = body->gen_value()->cast_to(proto->type->return_type);
     // Finish off the function.
     LLVMBuildRet(curr_builder, ret_val->gen_load());
+    unnamed_acc = 0;
+    return func;
     // doesnt exist in c api (i think)
     // // Validate the generated code, checking for consistency.
     // // verifyFunction(*TheFunction);
@@ -943,9 +955,10 @@ public:
             unsigned int *name_lengths, Type **types, unsigned int count)
       : name(name), name_len(name_len), names(names),
         name_lengths(name_lengths), types(types), count(count) {}
-  void gen_toplevel() {
+  LLVMValueRef gen_toplevel() {
     curr_named_types[std::string(name, name_len)] =
         new StructType(name, name_len, names, name_lengths, types, count);
+    return nullptr;
   }
 };
 
@@ -957,5 +970,8 @@ class TypeDefAST : public TopLevelAST {
 public:
   TypeDefAST(char *name, unsigned int name_len, Type *type)
       : name(name), name_len(name_len), type(type) {}
-  void gen_toplevel() { curr_named_types[std::string(name, name_len)] = type; }
+  LLVMValueRef gen_toplevel() {
+    curr_named_types[std::string(name, name_len)] = type;
+    return nullptr;
+  }
 };
