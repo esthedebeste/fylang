@@ -208,6 +208,24 @@ static ExprAST *parse_while_expr() {
   }
   return new WhileExprAST(cond, then, elze);
 }
+/// forexpr ::= 'for' (expr; expr; expr) expr else expr
+static ExprAST *parse_for_expr() {
+  eat(T_FOR);
+  eat('(');
+  auto init = parse_expr(); // let i = 0
+  eat(';');                 // ;
+  auto cond = parse_expr(); // i < 5
+  eat(';');                 // ;
+  auto post = parse_expr(); // i = i + 1
+  eat(')');
+  auto body = parse_expr();
+  ExprAST *elze = nullptr;
+  if (curr_token == T_ELSE) {
+    eat(T_ELSE);
+    elze = parse_expr();
+  }
+  return new ForExprAST(init, cond, body, post, elze);
+}
 /// newexpr ::= 'new' type '{' (identifier '=' expr ',')* '}'
 static ExprAST *parse_new_expr() {
   eat(T_NEW, (char *)"new");
@@ -312,6 +330,8 @@ static ExprAST *parse_primary() {
     return parse_if_expr();
   case T_WHILE:
     return parse_while_expr();
+  case T_FOR:
+    return parse_for_expr();
   case T_LET:
   case T_CONST:
     return parse_let_expr();
@@ -429,7 +449,11 @@ static ExprAST *parse_bin_op_rhs(int expr_prec, ExprAST *LHS) {
     // Okay, we know this is a binop.
     int bin_op = curr_token;
     get_next_token(); // eat binop
-
+    bool op_assign = false;
+    if (curr_token == '=') { // do op and then assign to LHS
+      op_assign = true;
+      eat('=');
+    }
     // Parse the primary expression after the binary operator.
     auto RHS = parse_unary();
     if (!RHS)
@@ -442,7 +466,11 @@ static ExprAST *parse_bin_op_rhs(int expr_prec, ExprAST *LHS) {
       RHS = parse_bin_op_rhs(t_prec + 1, RHS);
 
     // Merge LHS/RHS.
-    LHS = new BinaryExprAST(bin_op, LHS, RHS);
+    auto op = new BinaryExprAST(bin_op, LHS, RHS);
+    if (op_assign) // assign LHS to op result
+      LHS = new BinaryExprAST('=', LHS, op);
+    else
+      LHS = op;
   }
 }
 static ExprAST *parse_expr() {

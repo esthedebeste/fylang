@@ -50,6 +50,7 @@ enum Tokens : const int {
   T_TYPEOF = -29,    // typeof
   T_TRUE = -30,      // true
   T_FALSE = -31,     // false
+  T_FOR = -32,       // for
 };
 
 static LLVMContextRef curr_ctx;

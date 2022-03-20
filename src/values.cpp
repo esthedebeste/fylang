@@ -5,29 +5,31 @@
 class Value {
 public:
   virtual Type *get_type() = 0;
-  virtual LLVMValueRef gen_load() = 0;
+  virtual LLVMValueRef gen_val() = 0;
   virtual LLVMValueRef gen_ptr() = 0;
+  virtual bool has_ptr() { return true; }
   Value *cast_to(Type *type);
 };
-/// ConstValue - For when everything always returns the same thing.
+/// ConstValue - Constant value with no pointer.
 class ConstValue : public Value {
 public:
-  LLVMValueRef const_load;
-  LLVMValueRef const_ptr;
+  LLVMValueRef val;
   Type *type;
-  ConstValue(Type *type, LLVMValueRef const_load, LLVMValueRef const_ptr)
-      : type(type), const_load(const_load), const_ptr(const_ptr) {}
+  ConstValue(Type *type, LLVMValueRef val) : type(type), val(val) {}
   Type *get_type() { return type; };
-  LLVMValueRef gen_load() {
-    if (!const_load)
-      error("No const load set");
-    return const_load;
-  };
-  LLVMValueRef gen_ptr() {
-    if (!const_ptr)
-      error("No const ptr set");
-    return const_ptr;
-  };
+  LLVMValueRef gen_val() { return val; };
+  LLVMValueRef gen_ptr() { error("Const values can't be pointered"); };
+  bool has_ptr() { return false; }
+};
+/// FuncValue - For functions
+class FuncValue : public Value {
+public:
+  LLVMValueRef func;
+  Type *type;
+  FuncValue(Type *type, LLVMValueRef func) : type(type), func(func) {}
+  Type *get_type() { return type; };
+  LLVMValueRef gen_val() { return func; };
+  LLVMValueRef gen_ptr() { return func; };
 };
 /// BasicLoadValue - generates a load op.
 class BasicLoadValue : public Value {
@@ -37,7 +39,7 @@ public:
   BasicLoadValue(LLVMValueRef variable, Type *type)
       : variable(variable), type(type) {}
   Type *get_type() { return type; }
-  LLVMValueRef gen_load() {
+  LLVMValueRef gen_val() {
     return LLVMBuildLoad2(curr_builder, type->llvm_type(), variable, UN);
   };
   LLVMValueRef gen_ptr() { return variable; };
@@ -49,25 +51,31 @@ public:
   LLVMBasicBlockRef b_bb;
   Value *b_v;
   Type *type;
+  LLVMValueRef load = nullptr;
+  LLVMValueRef ptr = nullptr;
   PHIValue(LLVMBasicBlockRef a_bb, Value *a_v, LLVMBasicBlockRef b_bb,
            Value *b_v)
       : a_bb(a_bb), a_v(a_v), b_bb(b_bb), b_v(b_v) {
     type = a_v->get_type(); // TODO
+    gen_val();
+    if (a_v->has_ptr() && b_v->has_ptr())
+      gen_ptr();
   }
   Type *get_type() { return type; }
-  LLVMValueRef gen_load() {
-    LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), UN);
-    LLVMValueRef incoming_v[2] = {a_v->gen_load(), b_v->gen_load()};
+  LLVMValueRef gen_val() {
+    if (load)
+      return load;
+    LLVMValueRef incoming_v[2] = {a_v->gen_val(), b_v->gen_val()};
     LLVMBasicBlockRef incoming_bb[2] = {a_bb, b_bb};
+    LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), UN);
     LLVMAddIncoming(phi, incoming_v, incoming_bb, 2);
-    return phi;
+    return load = phi;
   }
   LLVMValueRef gen_ptr() {
-    LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), UN);
-    LLVMValueRef incoming_v[2] = {a_v->gen_ptr(), b_v->gen_ptr()};
-    LLVMBasicBlockRef incoming_bb[2] = {a_bb, b_bb};
-    LLVMAddIncoming(phi, incoming_v, incoming_bb, 2);
-    return phi;
+    if (ptr)
+      return ptr;
+    else
+      error("conditional does not have a pointer-ish value on both sides");
   }
 };
 
@@ -126,8 +134,8 @@ public:
   Type *to;
   CastValue(Value *source, Type *to) : source(source), to(to) {}
   Type *get_type() { return to; }
-  LLVMValueRef gen_load() {
-    return cast(source->gen_load(), source->get_type(), to);
+  LLVMValueRef gen_val() {
+    return cast(source->gen_val(), source->get_type(), to);
   }
   LLVMValueRef gen_ptr() {
     return cast(source->gen_ptr(), new PointerType(source->get_type()),

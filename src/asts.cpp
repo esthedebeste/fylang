@@ -76,7 +76,7 @@ public:
         num = LLVMConstRealOfStringAndSize(type->llvm_type(), val, val_len);
     else
       num = LLVMConstIntOfStringAndSize(type->llvm_type(), val, val_len, base);
-    return new ConstValue(type, num, nullptr);
+    return new ConstValue(type, num);
   }
 };
 /// BoolExprAST - Expression class for boolean literals (true or false).
@@ -90,10 +90,8 @@ public:
   }
   Type *get_type() { return type; }
   Value *gen_value() {
-    return new ConstValue(type,
-                          value ? LLVMConstAllOnes(type->llvm_type())
-                                : LLVMConstNull(type->llvm_type()),
-                          nullptr);
+    return new ConstValue(type, value ? LLVMConstAllOnes(type->llvm_type())
+                                      : LLVMConstNull(type->llvm_type()));
   }
 };
 
@@ -159,7 +157,7 @@ public:
     if (value) {
       Value *val = value->gen_value();
       if (ConstValue *expr = dynamic_cast<ConstValue *>(val))
-        LLVMSetInitializer(ptr, val->gen_load());
+        LLVMSetInitializer(ptr, val->gen_val());
       else
         error("Global variable needs a constant value inside it");
     }
@@ -179,7 +177,7 @@ public:
     curr_named_variables[std::string(id, id_len)] =
         new BasicLoadValue(ptr, type);
     if (value) {
-      LLVMValueRef llvm_val = value->gen_value()->cast_to(type)->gen_load();
+      LLVMValueRef llvm_val = value->gen_value()->cast_to(type)->gen_val();
       LLVMBuildStore(curr_builder, llvm_val, ptr);
     }
     return new BasicLoadValue(ptr, type);
@@ -191,7 +189,7 @@ public:
     curr_named_variables[std::string(id, id_len)] =
         new BasicLoadValue(ptr, type);
     if (value) {
-      LLVMValueRef llvm_val = value->gen_value()->gen_load();
+      LLVMValueRef llvm_val = value->gen_value()->gen_val();
       LLVMBuildStore(curr_builder, llvm_val, ptr);
     }
     return ptr;
@@ -212,8 +210,7 @@ public:
   CharExprAST(char charr) : charr(charr) {}
   Type *get_type() { return new NumType(8, false, false); }
   Value *gen_value() {
-    return new ConstValue(get_type(), LLVMConstInt(int_8_type, charr, false),
-                          nullptr);
+    return new ConstValue(get_type(), LLVMConstInt(int_8_type, charr, false));
   }
 };
 
@@ -245,7 +242,7 @@ public:
         LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false)};
     // cast [ ... x i8 ]* to i8*
     LLVMValueRef cast = LLVMConstGEP2(t_type->llvm_type(), glob, zeros, 2);
-    return new ConstValue(p_type, cast, nullptr);
+    return new ConstValue(p_type, cast);
   }
   // LLVMValueRef u_gen_load() {
   //   return gen_variable((char *)".str", false)->gen_load();
@@ -402,7 +399,7 @@ public:
   Value *gen_assign() {
     LLVMValueRef store_ptr = LHS->gen_value()->gen_ptr();
     Value *val = RHS->gen_value()->cast_to(LHS->get_type());
-    LLVMBuildStore(curr_builder, val->gen_load(), store_ptr);
+    LLVMBuildStore(curr_builder, val->gen_val(), store_ptr);
     return new BasicLoadValue(store_ptr, type);
   }
   Value *gen_value() {
@@ -414,17 +411,14 @@ public:
     NumType *lhs_nt = dynamic_cast<NumType *>(lhs_t);
     NumType *rhs_nt = dynamic_cast<NumType *>(rhs_t);
     PointerType *rhs_pt = dynamic_cast<PointerType *>(rhs_t);
-    LLVMValueRef L = LHS->gen_value()->gen_load();
-    LLVMValueRef R = RHS->gen_value()->gen_load();
+    LLVMValueRef L = LHS->gen_value()->gen_val();
+    LLVMValueRef R = RHS->gen_value()->gen_val();
     if (lhs_nt && rhs_nt)
-      return new ConstValue(type, gen_num_num_binop(op, L, R, lhs_nt, rhs_nt),
-                            nullptr);
+      return new ConstValue(type, gen_num_num_binop(op, L, R, lhs_nt, rhs_nt));
     else if (lhs_nt && rhs_pt)
-      return new ConstValue(type, gen_ptr_num_binop(op, R, L, rhs_pt, lhs_nt),
-                            nullptr);
+      return new ConstValue(type, gen_ptr_num_binop(op, R, L, rhs_pt, lhs_nt));
     else if (lhs_pt && rhs_nt)
-      return new ConstValue(type, gen_ptr_num_binop(op, L, R, lhs_pt, rhs_nt),
-                            nullptr);
+      return new ConstValue(type, gen_ptr_num_binop(op, L, R, lhs_pt, rhs_nt));
     error("Unknown ptr_ptr op");
   }
 };
@@ -455,23 +449,19 @@ public:
     case '!':
       // shortcut for != 1
       return new ConstValue(
-          type,
-          LLVMBuildFCmp(curr_builder, LLVMRealONE, val->gen_load(),
-                        LLVMConstReal(float_64_type, 1.0), UN),
-          nullptr);
+          type, LLVMBuildFCmp(curr_builder, LLVMRealONE, val->gen_val(),
+                              LLVMConstReal(float_64_type, 1.0), UN));
     case '-':
       // shortcut for 0-n
-      return new ConstValue(type,
-                            LLVMBuildFSub(curr_builder,
-                                          LLVMConstReal(float_64_type, 0.0),
-                                          val->gen_load(), UN),
-                            nullptr);
+      return new ConstValue(
+          type, LLVMBuildFSub(curr_builder, LLVMConstReal(float_64_type, 0.0),
+                              val->gen_val(), UN));
     case '*':
-      return new BasicLoadValue(val->gen_load(), type);
+      return new BasicLoadValue(val->gen_val(), type);
     case '&':
-      return new ConstValue(type, val->gen_ptr(), nullptr);
+      return new ConstValue(type, val->gen_ptr());
     case T_RETURN:
-      LLVMBuildRet(curr_builder, val->gen_load());
+      LLVMBuildRet(curr_builder, val->gen_val());
       return val;
     default:
       fprintf(stderr, "Error: invalid prefix unary operator '%c'", op);
@@ -514,21 +504,20 @@ public:
 
   Type *get_type() { return type; }
   Value *gen_value() {
-    LLVMValueRef func = called->gen_value()->gen_load();
+    LLVMValueRef func = called->gen_value()->gen_val();
     if (!func)
       error("Unknown function referenced");
     LLVMValueRef *arg_vs = alloc_arr<LLVMValueRef>(args_len);
     for (unsigned i = 0; i < args_len; i++) {
       if (i < func_t->arg_count)
         arg_vs[i] =
-            args[i]->gen_value()->cast_to(func_t->arguments[i])->gen_load();
+            args[i]->gen_value()->cast_to(func_t->arguments[i])->gen_val();
       else
-        arg_vs[i] = args[i]->gen_value()->gen_load();
+        arg_vs[i] = args[i]->gen_value()->gen_val();
     }
     return new ConstValue(func_t->return_type,
                           LLVMBuildCall2(curr_builder, func_t->llvm_type(),
-                                         func, arg_vs, args_len, UN),
-                          nullptr);
+                                         func, arg_vs, args_len, UN));
   }
 };
 
@@ -557,9 +546,9 @@ public:
   Type *get_type() { return type; }
 
   Value *gen_value() {
-    LLVMValueRef index_v = index->gen_value()->gen_load();
+    LLVMValueRef index_v = index->gen_value()->gen_val();
     return new BasicLoadValue(LLVMBuildGEP2(curr_builder, type->llvm_type(),
-                                            value->gen_value()->gen_load(),
+                                            value->gen_value()->gen_val(),
                                             &index_v, 1, "indextmp"),
                               type);
   }
@@ -587,7 +576,7 @@ public:
   Value *gen_value() {
     return new BasicLoadValue(
         LLVMBuildStructGEP2(curr_builder, source_type->llvm_type(),
-                            source->gen_value()->gen_load(), index, key),
+                            source->gen_value()->gen_val(), index, key),
         type);
   }
 };
@@ -665,9 +654,9 @@ public:
           LLVMConstInt(LLVMInt32Type(), indexes[i], false)};
       LLVMValueRef set_ptr = LLVMBuildStructGEP2(
           curr_builder, s_type->llvm_type(), ptr, indexes[i], "tmpgep");
-      LLVMBuildStore(curr_builder, values[i]->gen_value()->gen_load(), set_ptr);
+      LLVMBuildStore(curr_builder, values[i]->gen_value()->gen_val(), set_ptr);
     }
-    return new ConstValue(p_type, ptr, nullptr);
+    return new ConstValue(p_type, ptr);
   }
 };
 
@@ -699,7 +688,7 @@ public:
   NullExprAST(Type *type) : type(type) {}
   Type *get_type() { return type; }
   Value *gen_value() {
-    return new ConstValue(type, LLVMConstNull(type->llvm_type()), nullptr);
+    return new ConstValue(type, LLVMConstNull(type->llvm_type()));
   }
 };
 
@@ -718,8 +707,9 @@ public:
       elze = new NullExprAST(type);
     Type *else_t = elze->get_type();
     if (then_t->neq(else_t)) {
-      fprintf(stderr,
-              "Error: if's then and else side don't have the same type, ");
+      fprintf(
+          stderr,
+          "Error: conditional's then and else side don't have the same type, ");
       then_t->log_diff(else_t);
       fprintf(stderr, ".\n");
       exit(1);
@@ -730,11 +720,9 @@ public:
   Type *get_type() { return type; }
 
   Value *gen_value() {
-    LLVMValueRef cond_v = cond->gen_value()->gen_load();
-    if (NumType *n = dynamic_cast<NumType *>(cond->get_type()))
-      if (n->is_floating)
-        cond_v = LLVMBuildFCmp(curr_builder, LLVMRealONE, cond_v,
-                               LLVMConstReal(float_64_type, 0.0), "ifcond");
+    // cast to bool
+    LLVMValueRef cond_v =
+        cond->gen_value()->cast_to(new NumType(1, false, false))->gen_val();
     LLVMValueRef func =
         LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder));
     LLVMBasicBlockRef then_bb =
@@ -770,11 +758,9 @@ class WhileExprAST : public IfExprAST {
 public:
   using IfExprAST::IfExprAST; // inherit constructor from IfExprAST
   Value *gen_value() {
-    LLVMValueRef cond_v = cond->gen_value()->gen_load();
-    if (NumType *n = dynamic_cast<NumType *>(cond->get_type()))
-      if (n->is_floating)
-        cond_v = LLVMBuildFCmp(curr_builder, LLVMRealONE, cond_v,
-                               LLVMConstReal(float_64_type, 0.0), UN);
+    // cast to bool
+    LLVMValueRef cond_v =
+        cond->gen_value()->cast_to(new NumType(1, false, false))->gen_val();
     LLVMValueRef func =
         LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder));
     LLVMBasicBlockRef then_bb =
@@ -786,11 +772,9 @@ public:
     // then
     LLVMPositionBuilderAtEnd(curr_builder, then_bb);
     Value *then_v = then->gen_value();
-    LLVMValueRef cond_v2 = cond->gen_value()->gen_load();
-    if (NumType *n = dynamic_cast<NumType *>(cond->get_type()))
-      if (n->is_floating)
-        cond_v2 = LLVMBuildFCmp(curr_builder, LLVMRealONE, cond_v,
-                                LLVMConstReal(float_64_type, 0.0), UN);
+    // cast to bool
+    LLVMValueRef cond_v2 =
+        cond->gen_value()->cast_to(new NumType(1, false, false))->gen_val();
     LLVMBuildCondBr(curr_builder, cond_v2, then_bb, merge_bb);
     // Codegen of 'then' can change the current block, update then_bb for the
     // PHI.
@@ -809,6 +793,55 @@ public:
     return new PHIValue(then_bb, then_v, else_bb, else_v);
   }
 };
+
+class ForExprAST : public IfExprAST {
+  ExprAST *init;
+  ExprAST *post;
+
+public:
+  ForExprAST(ExprAST *init, ExprAST *cond, ExprAST *body, ExprAST *post,
+             ExprAST *elze)
+      : init(init), post(post), IfExprAST(cond, body, elze) {}
+  Value *gen_value() {
+    init->gen_value(); // let i = 0
+
+    // cast to bool
+    LLVMValueRef cond_v =
+        cond->gen_value()->cast_to(new NumType(1, false, false))->gen_val();
+    LLVMValueRef func =
+        LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder));
+    LLVMBasicBlockRef then_bb =
+        LLVMAppendBasicBlockInContext(curr_ctx, func, UN);
+    LLVMBasicBlockRef else_bb = LLVMCreateBasicBlockInContext(curr_ctx, UN);
+    LLVMBasicBlockRef merge_bb = LLVMCreateBasicBlockInContext(curr_ctx, UN);
+    // for
+    LLVMBuildCondBr(curr_builder, cond_v, then_bb, else_bb);
+    // then
+    LLVMPositionBuilderAtEnd(curr_builder, then_bb);
+    Value *then_v = then->gen_value();
+    post->gen_value(); // i = i + 1
+    // cast to bool
+    LLVMValueRef cond_v2 =
+        cond->gen_value()->cast_to(new NumType(1, false, false))->gen_val();
+    LLVMBuildCondBr(curr_builder, cond_v2, then_bb, merge_bb);
+    // Codegen of 'then' can change the current block, update then_bb for the
+    // PHI.
+    then_bb = LLVMGetInsertBlock(curr_builder);
+    // else
+    LLVMAppendExistingBasicBlock(func, else_bb);
+    LLVMPositionBuilderAtEnd(curr_builder, else_bb);
+    Value *else_v = elze->gen_value();
+    LLVMBuildBr(curr_builder, merge_bb);
+    // Codegen of 'else' can change the current block, update else_bb for the
+    // PHI.
+    else_bb = LLVMGetInsertBlock(curr_builder);
+    // merge
+    LLVMAppendExistingBasicBlock(func, merge_bb);
+    LLVMPositionBuilderAtEnd(curr_builder, merge_bb);
+    return new PHIValue(then_bb, then_v, else_bb, else_v);
+  }
+};
+
 /// PrototypeAST - This class represents the "prototype" for a function,
 /// which captures its name, and its argument names (thus implicitly the
 /// number of arguments the function takes).
@@ -853,7 +886,7 @@ public:
   LLVMValueRef codegen() {
     LLVMValueRef func = LLVMAddFunction(curr_module, name, type->llvm_type());
     curr_named_variables[std::string(name, name_len)] =
-        new ConstValue(type, func, func);
+        new FuncValue(type, func);
     // Set names for all arguments.
     LLVMValueRef *params = alloc_arr<LLVMValueRef>(arg_count);
     LLVMGetParams(func, params);
@@ -930,10 +963,10 @@ public:
     size_t unused = 0;
     for (unsigned i = 0; i != args_len; ++i)
       curr_named_variables[LLVMGetValueName2(params[i], &unused)] =
-          new ConstValue(proto->arg_types[i], params[i], nullptr);
+          new ConstValue(proto->arg_types[i], params[i]);
     Value *ret_val = body->gen_value()->cast_to(proto->type->return_type);
     // Finish off the function.
-    LLVMBuildRet(curr_builder, ret_val->gen_load());
+    LLVMBuildRet(curr_builder, ret_val->gen_val());
     unnamed_acc = 0;
     return func;
     // doesnt exist in c api (i think)

@@ -1,10 +1,10 @@
 include "c/stdio"
 include "types.fy"
-include "std/string.fy"
+include "string.fy"
 
 // eputc - takes a char and prints it to stderr
 fun eputc(ch: char)
-    fputc(ch as int32, stderr)
+    fputc(ch, stderr)
 
 // eputs - takes a string and prints it to stderr (without newline)
 fun eputs(str: *char)

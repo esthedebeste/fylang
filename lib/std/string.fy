@@ -30,11 +30,8 @@ fun(*String) concat(other: *String): *String {
 
 fun(*String) transform(transformer: *fun(char): char): *String {
     let uppered = alloc_chars(this.length)
-    let i = 0
-    while (i < this.length) {
+    for (let i = 0; i < this.length; i += 1)
         uppered[i] = transformer(this.chars[i])
-        i = i + 1
-    }
     new String { chars = uppered, length = this.length }
 }
 
@@ -46,16 +43,12 @@ fun(*String) lowercase(): *String
 
 
 fun streql(a: *char, b: *char, len: int_ptrsize): bool {
-    let i = 0 as int_ptrsize
-    while (i < len) {
+    for (let i = 0 as int_ptrsize; i < len; i += 1)
         if (a[i] != b[i])
-            false
-        i = i + 1
-    }
+            return false
     true
 }
 
-include "std/io"
 fun(*String) starts_with(prefix: *String): bool
     if(this.length < prefix.length) false
     else streql(this.chars, prefix.chars, prefix.length)
@@ -65,10 +58,8 @@ fun(*String) ends_with(postfix: *String): bool
     else {
         const offset = this.length - postfix.length
         let i = postfix.length
-        while (i > 0) {
-            if (this.chars[offset+i - 1] != postfix.chars[i - 1])
+        for (let i = postfix.length; i > 0; i -= 1)
+            if (this.chars[offset + i - 1] != postfix.chars[i - 1])
                 return false
-            i = i - 1
-        }
         true
     }
