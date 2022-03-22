@@ -30,6 +30,7 @@ public:
   Type *get_type() { return type; };
   LLVMValueRef gen_val() { return func; };
   LLVMValueRef gen_ptr() { return func; };
+  bool has_ptr() { return true; }
 };
 /// BasicLoadValue - generates a load op.
 class BasicLoadValue : public Value {
@@ -43,6 +44,7 @@ public:
     return LLVMBuildLoad2(curr_builder, type->llvm_type(), variable, UN);
   };
   LLVMValueRef gen_ptr() { return variable; };
+  bool has_ptr() { return true; }
 };
 class PHIValue : public Value {
 public:
@@ -77,10 +79,20 @@ public:
     else
       error("conditional does not have a pointer-ish value on both sides");
   }
+  bool has_ptr() { return ptr != nullptr; }
 };
 
 LLVMValueRef gen_num_cast(LLVMValueRef value, NumType *a, Type *b) {
   if (NumType *num = dynamic_cast<NumType *>(b)) {
+    if (num->bits == 1) {
+      LLVMValueRef zero = LLVMConstNull(a->llvm_type());
+      if (a->is_floating)
+        return LLVMBuildFCmp(curr_builder, LLVMRealPredicate::LLVMRealUNE,
+                             value, zero, UN);
+      else
+        return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntNE, value,
+                             zero, UN);
+    }
     if (!num->is_floating && a->is_floating)
       return LLVMBuildCast(curr_builder, a->is_signed ? LLVMFPToSI : LLVMFPToUI,
                            value, b->llvm_type(), UN);
@@ -141,5 +153,27 @@ public:
     return cast(source->gen_ptr(), new PointerType(source->get_type()),
                 new PointerType(source->get_type()));
   }
+  bool has_ptr() { return source->has_ptr(); }
 };
 Value *Value::cast_to(Type *to) { return new CastValue(this, to); }
+
+class NamedValue : public Value {
+public:
+  Value *val;
+  char *name;
+  size_t name_len;
+  NamedValue(Value *val, char *name, size_t name_len)
+      : val(val), name(name), name_len(name_len) {}
+  Type *get_type() { return val->get_type(); }
+  LLVMValueRef gen_val() {
+    LLVMValueRef value = val->gen_val();
+    LLVMSetValueName2(value, name, name_len);
+    return value;
+  }
+  LLVMValueRef gen_ptr() {
+    LLVMValueRef value = val->gen_ptr();
+    LLVMSetValueName2(value, name, name_len);
+    return value;
+  }
+  bool has_ptr() { return val->has_ptr(); }
+};

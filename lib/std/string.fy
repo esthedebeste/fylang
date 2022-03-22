@@ -3,7 +3,6 @@ include "c/stdlib"
 include "types.fy"
 include "char.fy"
 
-const CHAR_SIZE = 1
 fun(*char) length()
     strlen(this)
 fun(*char) clone()
@@ -15,7 +14,10 @@ struct String {
 }
 
 fun alloc_chars(amount: int_ptrsize): *char
-    calloc(amount, CHAR_SIZE)
+    calloc(amount, 1) // null-initialized
+
+fun realloc_chars(ptr: *char, new_size: int_ptrsize): *char
+    realloc(ptr, new_size)
 
 fun create_string(chars: *char)
     new String { chars = chars.clone(), length = chars.length() }
@@ -30,9 +32,22 @@ fun(*String) concat(other: *String): *String {
 
 fun(*String) transform(transformer: *fun(char): char): *String {
     let uppered = alloc_chars(this.length)
-    for (let i = 0; i < this.length; i += 1)
+    for (let i: int_ptrsize = 0; i < this.length; i += 1)
         uppered[i] = transformer(this.chars[i])
     new String { chars = uppered, length = this.length }
+}
+
+fun(*String) filter(predicate: *fun(char): bool): *String {
+    const result = alloc_chars(this.length)
+    let len: int_ptrsize = 0
+    for (let i: int_ptrsize = 0; i < this.length; i += 1) {
+        const char = this.chars[i]
+        if (predicate(char)) {
+            result[len] = char
+            len += 1
+        }
+    }
+    new String { chars = realloc_chars(result, len), length = len }
 }
 
 fun(*String) uppercase(): *String 
@@ -48,7 +63,6 @@ fun streql(a: *char, b: *char, len: int_ptrsize): bool {
             return false
     true
 }
-
 fun(*String) starts_with(prefix: *String): bool
     if(this.length < prefix.length) false
     else streql(this.chars, prefix.chars, prefix.length)
@@ -57,7 +71,6 @@ fun(*String) ends_with(postfix: *String): bool
     if(this.length < postfix.length) false
     else {
         const offset = this.length - postfix.length
-        let i = postfix.length
         for (let i = postfix.length; i > 0; i -= 1)
             if (this.chars[offset + i - 1] != postfix.chars[i - 1])
                 return false

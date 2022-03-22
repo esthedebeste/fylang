@@ -19,7 +19,7 @@ fun eputn(i: int)
     fprintf(stderr, "%d", i)
 
 fun(*String) print_to(stream: *FILE)
-   fwrite(this.chars, CHAR_SIZE, this.length, stream)
+   fwrite(this.chars, 1, this.length, stream)
 
 fun(*String) print()
     this.print_to(stderr)

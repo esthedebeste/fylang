@@ -26,7 +26,7 @@ static Type *parse_function_type() {
   eat(T_FUNCTION, (char *)"fun");
   eat('(');
   Type **arg_types = alloc_arr<Type *>(64);
-  unsigned int args_len = 0;
+  size_t args_len = 0;
   bool vararg = false;
   if (curr_token != ')') {
     while (1) {
@@ -52,11 +52,11 @@ static Type *parse_function_type() {
 
 static Type *parse_num_type() {
   char *id = identifier_string;
-  unsigned int id_len = identifier_string_length;
+  size_t id_len = identifier_string_length;
   eat(T_IDENTIFIER, (char *)"identifier");
 #define strlen(str) (sizeof(str) - 1)
 #define check_type(str, is_floating, is_signed)                                \
-  if (id_len >= strlen(str) && streql(id, strlen(str), str, strlen(str)))      \
+  if (id_len >= strlen(str) && streql(id, str, strlen(str)))                   \
     if (id_len > strlen(str))                                                  \
       return new NumType(id + strlen(str), id_len - strlen(str), is_floating,  \
                          is_signed);                                           \
@@ -79,7 +79,7 @@ static Type *parse_num_type() {
 static TypeDefAST *parse_type_definition() {
   eat(T_TYPE, (char *)"type");
   char *name = identifier_string;
-  unsigned int name_len = identifier_string_length;
+  size_t name_len = identifier_string_length;
   eat(T_IDENTIFIER, (char *)"identifier");
   eat('=');
   Type *t = parse_type_unary();
@@ -138,7 +138,7 @@ static Type *parse_type_postfix() {
         prev = new PointerType(prev);
       }
       char *num = num_value;
-      unsigned int num_len = num_length;
+      size_t num_len = num_length;
       if (num_has_dot)
         error("List lengths have to be integers");
       eat(T_NUMBER);
@@ -179,7 +179,7 @@ static ExprAST *parse_paren_expr() {
 ///   ::= identifier
 static ExprAST *parse_identifier_expr() {
   char *id = identifier_string;
-  unsigned int id_len = identifier_string_length;
+  size_t id_len = identifier_string_length;
   eat(T_IDENTIFIER, (char *)"identifier");
   return new VariableExprAST(id, id_len);
 }
@@ -233,7 +233,7 @@ static ExprAST *parse_new_expr() {
   if (!type)
     error("new with non-struct value");
   char **keys = alloc_arr<char *>(128);
-  unsigned int *key_lens = alloc_arr<unsigned int>(128);
+  size_t *key_lens = alloc_arr<size_t>(128);
   ExprAST **values = alloc_arr<ExprAST *>(128);
   unsigned int key_count = 0;
   eat('{');
@@ -281,7 +281,7 @@ static LetExprAST *parse_let_expr(bool global = false) {
   } else
     eat(T_LET, (char *)"let");
   char *id = identifier_string;
-  unsigned int id_len = identifier_string_length;
+  size_t id_len = identifier_string_length;
   Type *type = nullptr;
   eat(T_IDENTIFIER, (char *)"variable name");
   // explicit typing
@@ -345,6 +345,10 @@ static ExprAST *parse_primary() {
   }
 }
 static int get_token_precedence() {
+  if (binop_precedence.count(curr_token))
+    return binop_precedence[curr_token];
+  else
+    return -1;
   int t_prec = binop_precedence[curr_token];
   if (t_prec <= 0)
     return -1;
@@ -353,7 +357,7 @@ static int get_token_precedence() {
 
 struct ParseCallResult {
   ExprAST **args;
-  unsigned int args_len = 0;
+  size_t args_len = 0;
 };
 static ParseCallResult parse_call() {
   eat('(');
@@ -385,7 +389,7 @@ static ExprAST *parse_postfix() {
     case '.': {
       eat('.');
       char *id = identifier_string;
-      unsigned int id_len = identifier_string_length;
+      size_t id_len = identifier_string_length;
       eat(T_IDENTIFIER, (char *)"identifier");
       if (curr_token == '(') {
         ParseCallResult call = parse_call();
@@ -439,17 +443,18 @@ static ExprAST *parse_unary() {
 static ExprAST *parse_bin_op_rhs(int expr_prec, ExprAST *LHS) {
   // If this is a binop, find its precedence.
   while (true) {
-    int t_prec = get_token_precedence();
-
-    // If this is a binop that binds at least as tightly as the current binop,
-    // consume it, otherwise we are done.
+    if (!binop_precedence.count(curr_token))
+      return LHS; // doesn't exist
+    int t_prec = binop_precedence[curr_token];
+    bool op_assign = false;
+    // If this is a binop that binds at least as tightly as the current
+    // binop, consume it, otherwise we are done.
     if (t_prec < expr_prec)
       return LHS;
 
     // Okay, we know this is a binop.
     int bin_op = curr_token;
-    get_next_token(); // eat binop
-    bool op_assign = false;
+    get_next_token();        // eat binop
     if (curr_token == '=') { // do op and then assign to LHS
       op_assign = true;
       eat('=');
@@ -489,13 +494,13 @@ static PrototypeAST *parse_prototype(Type *default_return_type = nullptr) {
     eat(')');
   }
   char *fn_name = identifier_string;
-  unsigned int fn_name_len = identifier_string_length;
+  size_t fn_name_len = identifier_string_length;
   eat(T_IDENTIFIER, (char *)"identifier");
   eat('(');
 
   // Read the list of argument names.
   char **arg_names = alloc_arr<char *>(64);
-  unsigned int *arg_name_lens = alloc_arr<unsigned int>(64);
+  size_t *arg_name_lens = alloc_arr<size_t>(64);
   Type **arg_types = alloc_arr<Type *>(64);
   unsigned int arg_count = 0;
   bool vararg = false;
@@ -566,17 +571,17 @@ static DeclareExprAST *parse_declare() {
 static StructAST *parse_struct() {
   eat(T_STRUCT, (char *)"struct"); // eat struct.
   char *struct_name = identifier_string;
-  unsigned int struct_name_len = identifier_string_length;
+  size_t struct_name_len = identifier_string_length;
   eat(T_IDENTIFIER, (char *)"identifier");
   eat('{');
   char **key_names = alloc_arr<char *>(128);
   Type **key_types = alloc_arr<Type *>(128);
-  unsigned int *key_name_lens = alloc_arr<unsigned int>(128);
+  size_t *key_name_lens = alloc_arr<size_t>(128);
   unsigned int key_count = 0;
   if (curr_token != '}')
     while (1) {
       char *id = identifier_string;
-      unsigned int id_len = identifier_string_length;
+      size_t id_len = identifier_string_length;
       eat(T_IDENTIFIER, (char *)"identifier");
       if (curr_token == ':') {
         key_names[key_count] = id;
@@ -592,7 +597,7 @@ static StructAST *parse_struct() {
     }
   eat('}');
   key_names = realloc_arr<char *>(key_names, key_count);
-  key_name_lens = realloc_arr<unsigned int>(key_name_lens, key_count);
+  key_name_lens = realloc_arr<size_t>(key_name_lens, key_count);
   key_types = realloc_arr<Type *>(key_types, key_count);
   return new StructAST(struct_name, struct_name_len, key_names, key_name_lens,
                        key_types, key_count);

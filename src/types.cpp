@@ -3,16 +3,6 @@
 
 static LLVMTypeRef void_type =
     LLVMStructCreateNamed(LLVMGetGlobalContext(), "void");
-static LLVMTypeRef int_1_type = LLVMInt1Type(); // AKA bool
-static LLVMTypeRef int_8_type = LLVMInt8Type(); // AKA byte, char
-static LLVMTypeRef int_16_type = LLVMInt16Type();
-static LLVMTypeRef int_32_type = LLVMInt32Type();    // AKA int
-static LLVMTypeRef int_64_type = LLVMInt64Type();    // AKA long
-static LLVMTypeRef int_128_type = LLVMInt128Type();  // AKA long long
-static LLVMTypeRef float_16_type = LLVMHalfType();   // AKA half
-static LLVMTypeRef float_32_type = LLVMFloatType();  // AKA float
-static LLVMTypeRef float_64_type = LLVMDoubleType(); // AKA double
-static LLVMTypeRef float_128_type = LLVMFP128Type();
 
 enum TypeType {
   Void = 0,
@@ -74,8 +64,7 @@ public:
       : bits(bits), is_floating(is_floating), is_signed(is_signed) {
     byte_size = bits * 8;
   }
-  NumType(char *bits_str, unsigned int bits_str_len, bool is_floating,
-          bool is_signed)
+  NumType(char *bits_str, size_t bits_str_len, bool is_floating, bool is_signed)
       : is_floating(is_floating), is_signed(is_signed) {
     if (streq_lit(bits_str, bits_str_len, "_ptrsize"))
       bits = LLVMPointerSize(target_data) * 8;
@@ -84,34 +73,21 @@ public:
     byte_size = bits / 8;
   }
   LLVMTypeRef llvm_type() {
+    if (!is_floating)
+      return LLVMIntType(bits);
     switch (bits) {
-    case 1:
-      if (is_floating)
-        error("floating 1-bit numbers don't exist");
-      return int_1_type;
-    case 8:
-      if (is_floating)
-        error("floating 8-bit numbers don't exist");
-      return int_8_type;
     case 16:
-      if (is_floating)
-        return float_16_type;
-      return int_16_type;
+      return LLVMHalfType();
     case 32:
-      if (is_floating)
-        return float_32_type;
-      return int_32_type;
+      return LLVMFloatType();
     case 64:
-      if (is_floating)
-        return float_64_type;
-      return int_64_type;
+      return LLVMDoubleType();
     case 128:
-      if (is_floating)
-        return float_128_type;
-      return int_128_type;
+      return LLVMFP128Type();
+    default:
+      fprintf(stderr, "TypeError: floating %d-bit numbers don't exist", bits);
+      exit(1);
     }
-    fprintf(stderr, "TypeError: Unknown numerical type %s", this->stringify());
-    exit(1);
   }
   TypeType type_type() { return TypeType::Number; }
   bool eq(Type *other) {
@@ -170,7 +146,7 @@ public:
 
   const char *stringify() {
     const char *contains = elem->stringify();
-    unsigned int count_len = log10(count);
+    size_t count_len = log10(count);
     char *str = alloc_c(2 + strlen(contains) + 3 + count_len + 2);
     strcat(str, "( ");
     strcat(str, contains);
@@ -185,13 +161,13 @@ class StructType : public Type {
 
 public:
   char *name;
-  unsigned int name_len;
+  size_t name_len;
   Type **types;
   char **keys;
-  unsigned int *key_lengths;
+  size_t *key_lengths;
   unsigned int count;
-  StructType(char *name, unsigned int name_len, char **keys,
-             unsigned int *key_lengths, Type **types, unsigned int count)
+  StructType(char *name, size_t name_len, char **keys, size_t *key_lengths,
+             Type **types, unsigned int count)
       : name(name), name_len(name_len), keys(keys), key_lengths(key_lengths),
         types(types), count(count) {
     LLVMTypeRef *llvm_types = alloc_arr<LLVMTypeRef>(count);
@@ -205,10 +181,10 @@ public:
       error("Struct get_elem_type index out of bounds");
     return types[index];
   }
-  unsigned int get_index(char *name, unsigned int name_len) {
+  unsigned int get_index(char *name, size_t name_len) {
     for (unsigned int i = 0; i < count; i++) {
       if (key_lengths[i] == name_len) {
-        for (unsigned int j = 0; j < name_len; j++)
+        for (size_t j = 0; j < name_len; j++)
           if (keys[i][j] != name[j])
             continue;
         return i;
@@ -264,7 +240,7 @@ public:
   };
   const char *stringify() {
     const char **arg_strs = alloc_arr<const char *>(arg_count);
-    unsigned int final_len = 7; /* "fun(): " */
+    size_t final_len = 7; /* "fun(): " */
     for (unsigned int i = 0; i < arg_count; i++) {
       const char *type = arguments[i]->stringify();
       arg_strs[i] = type;

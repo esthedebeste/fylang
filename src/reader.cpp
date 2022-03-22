@@ -1,10 +1,9 @@
 #pragma once
 #include "utils.cpp"
 class CharReader {
-#define BUF_SIZE 4096
-  char buf[BUF_SIZE];
+  char buf[4096];
   char *p;
-  unsigned int n;
+  size_t n;
   bool ended;
 
 public:
@@ -34,9 +33,9 @@ public:
 };
 
 char **visited_paths = new char *[1];
-unsigned int visited_paths_len;
+size_t visited_paths_len;
 CharReader **queue = new CharReader *[1];
-unsigned int queue_len = 0;
+size_t queue_len = 0;
 static int next_char() {
   char ret = EOF;
   while (ret == EOF && queue_len > 0) {
@@ -87,17 +86,17 @@ CharReader *get_file(char *base_path, char *relative_path) {
 }
 
 static void add_file_to_queue(char *base_path, char *relative_path) {
-  static unsigned int queue_allocated = 1;
+  static size_t queue_allocated = 1;
   if (queue_len >= queue_allocated) {
     queue_allocated *= 2;
     queue = realloc_arr<CharReader *>(queue, queue_allocated);
   }
   CharReader *file = get_file(base_path, relative_path);
   char *path = realpath(file->file_path, nullptr);
-  for (unsigned int i = 0; i < visited_paths_len; i++)
+  for (size_t i = 0; i < visited_paths_len; i++)
     if (streq(visited_paths[i], path))
       return; // similar to C #pragma once
-  static unsigned int visited_allocated = 1;
+  static size_t visited_allocated = 1;
   if (visited_paths_len >= visited_allocated) {
     visited_allocated *= 2;
     visited_paths = realloc_arr<char *>(visited_paths, visited_allocated);

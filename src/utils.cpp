@@ -13,34 +13,31 @@ inline char *realloc_c(char *ptr, size_t amount) {
   return realloc_arr<char>(ptr, amount);
 }
 
-static bool streql(const char *a, const unsigned int alen, const char *b,
-                   const unsigned int blen) {
-  if (alen != blen)
-    return false;
-  for (unsigned int i = 0; i < alen; i++)
+static bool streql(const char *a, const char *b, const size_t len) {
+  for (size_t i = 0; i < len; i++)
     if (a[i] != b[i])
       return false;
   return true;
 }
 // streql for const char[n]
-#define streq_lit(a, alen, b) streql(a, alen, b, sizeof(b) - 1)
+#define streq_lit(a, alen, b) ((sizeof(b) - 1) == (alen)) && streql(a, b, alen)
 static bool streq(const char *a, const char *b) { return strcmp(a, b) == 0; }
 // assumes that num_str actually has that base
-static unsigned int parse_pos_int(char *num_str, unsigned int num_str_len,
+static unsigned int parse_pos_int(char *num_str, size_t num_str_len,
                                   unsigned int base = 10) {
   unsigned int result = 0;
-  for (unsigned int i = 0; i < num_str_len; i++)
+  for (size_t i = 0; i < num_str_len; i++)
     result = result * base + (num_str[i] > '9' ? num_str[i] >= 'A'
                                                      ? num_str[i] - 'A' + 10
                                                      : num_str[i] - 'a' + 10
                                                : num_str[i] - '0');
   return result;
 }
-static char *num_to_str(unsigned int num, unsigned int base = 10) {
-  unsigned int len = log(num) / log(base) + 1;
+static char *num_to_str(unsigned int num, unsigned short base = 10) {
+  size_t len = log(num) / log(base) + 1;
   char *buf = alloc_c(len);
-  for (unsigned int i = len; i > 0; i--) {
-    unsigned int curr = num % base;
+  for (size_t i = len; i > 0; i--) {
+    unsigned short curr = num % base;
     num = num / base;
     buf[i - 1] = curr < 10 ? curr + '0' : curr + 'a' - 10;
   }

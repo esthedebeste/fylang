@@ -1,8 +1,8 @@
 #include "utils.cpp"
 LLVMValueRef *used_globals = new LLVMValueRef[1];
-unsigned int used_globals_len = 0;
+size_t used_globals_len = 0;
 void add_used_global(LLVMValueRef global) {
-  static unsigned int allocated = 1;
+  static size_t allocated = 1;
   if (used_globals_len >= allocated) {
     allocated *= 2;
     used_globals = realloc_arr<LLVMValueRef>(used_globals, allocated);
@@ -10,7 +10,7 @@ void add_used_global(LLVMValueRef global) {
   used_globals[used_globals_len++] = global;
 }
 bool is_global_used(LLVMValueRef global) {
-  for (unsigned int i = 0; i < used_globals_len; i++)
+  for (size_t i = 0; i < used_globals_len; i++)
     if (global == used_globals[i])
       return true;
   return false;

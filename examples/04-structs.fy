@@ -10,8 +10,7 @@ fun print_to_stdout(str: *String)
 		eputc(str.pointer[i])
 
 fun main() {
-	// Create a new instance of the String struct (this is a *String)
-	const str = new String { pointer = "Hello from structs.fy!", length = 22 }
+	const str: *String = new String { pointer = "Hello from structs.fy!", length = 22 }
 	print_to_stdout(str)
 	0
 }

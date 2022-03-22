@@ -2,25 +2,24 @@
 #include "reader.cpp"
 #include "utils.cpp"
 
-static unsigned int identifier_string_length;
+static size_t identifier_string_length;
 static char
-    *identifier_string; // [a-zA-Z][a-zA-Z0-9]* - Filled in if T_IDENTIFIER
-static char char_value; // '[^']' - Filled in if T_CHAR
-static char *num_value; // Filled in if T_NUMBER
-static unsigned int num_length; // len(num_value) - Filled in if T_NUMBER
+    *identifier_string;   // [a-zA-Z][a-zA-Z0-9]* - Filled in if T_IDENTIFIER
+static char char_value;   // '[^']' - Filled in if T_CHAR
+static char *num_value;   // Filled in if T_NUMBER
+static size_t num_length; // len(num_value) - Filled in if T_NUMBER
 static bool
     num_has_dot;      // Whether num_value contains '.' - Filled in if T_NUMBER
 static char num_type; // Type of number. 'd' => double, 'f' => float, 'i' =>
                       // int32, 'u' => uint32, 'b' => byte/char/uint8
-static char *string_value;         // "[^"]*" - Filled in if T_STRING
-static unsigned int string_length; // len(string_value) - Filled in if T_STRING
+static char *string_value;   // "[^"]*" - Filled in if T_STRING
+static size_t string_length; // len(string_value) - Filled in if T_STRING
 
 static int last_char = ' ';
-static void read_str(bool (*predicate)(char), char **output,
-                     unsigned int *length) {
-  unsigned int curr_size = 512;
+static void read_str(bool (*predicate)(char), char **output, size_t *length) {
+  size_t curr_size = 512;
   char *str = alloc_c(curr_size);
-  static unsigned int str_len = 0;
+  static size_t str_len = 0;
   str[0] = last_char;
   str_len = 1;
   while (predicate(last_char = next_char())) {
@@ -76,11 +75,10 @@ static char get_escape(char escape_char) {
 
 // Returns a token, or a number of the token's ASCII value.
 static int next_token() {
+  while (isspace(last_char))
+    last_char = next_char();
   if (last_char == EOF)
     return T_EOF;
-  while (isspace(last_char)) {
-    last_char = next_char();
-  }
   if (isalpha(last_char) || last_char == '_') {
     read_str(&is_alphaish, &identifier_string, &identifier_string_length);
 #define T_eq(str) streq_lit(identifier_string, identifier_string_length, str)
@@ -146,13 +144,13 @@ static int next_token() {
     return T_NUMBER;
   } else if (last_char == '"') {
     // String: "[^"]*"
-    unsigned int curr_size = 512;
+    size_t curr_size = 512;
     char *str = alloc_c(curr_size);
-    unsigned int str_len = 0;
+    size_t str_len = 0;
     while ((last_char = next_char()) != '"') {
       if (last_char == EOF)
         error("Unexpected EOF in string");
-      if (str_len > curr_size) {
+      if (str_len > curr_size - 1) { // leave room for null-byte
         curr_size *= 2;
         str = realloc_c(str, curr_size);
       }
@@ -162,9 +160,7 @@ static int next_token() {
         str[str_len] = last_char;
       str_len++;
     }
-    str[str_len] = '\0';
-    str_len++;
-    str = realloc_c(str, str_len + 1);
+    str[str_len++] = '\0';
     string_value = str;
     string_length = str_len;
     last_char = next_char();
@@ -187,20 +183,26 @@ static int next_token() {
   int curr_char = last_char;
   last_char = next_char();
   if (last_char == '=') // ==, <=, >=, !=
+#define eq_case(ch, token)                                                     \
+  case ch:                                                                     \
+    last_char = next_char();                                                   \
+    return token
+
     switch (curr_char) {
-    case '=': // ==
-      last_char = next_char();
-      return T_EQEQ;
-    case '<': // <=
-      last_char = next_char();
-      return T_LEQ;
-    case '>': // >=
-      last_char = next_char();
-      return T_GEQ;
-    case '!': // !=
-      last_char = next_char();
-      return T_NEQ;
+      eq_case('=', T_EQEQ);
+      eq_case('<', T_LEQ);
+      eq_case('>', T_GEQ);
+      eq_case('!', T_NEQ);
+      eq_case('+', T_PLUSEQ);
+      eq_case('-', T_MINEQ);
+      eq_case('*', T_STAREQ);
+      eq_case('/', T_SLASHEQ);
+      eq_case('%', T_PERCENTEQ);
+      eq_case('&', T_ANDEQ);
+      eq_case('|', T_OREQ);
+#undef eq_case
     }
+
   if (curr_char == '|' && last_char == '|') // ||
   {
     last_char = next_char();
