@@ -18,6 +18,6 @@ fun is_alphanum(ch: char)
 fun main() {
 	let str = "F@#(*i@#&l!#*(&t@$&*e!@)r@#()e{:><}d#!@*("
 	// We pass the is_alphanum function to put_filtered as a predicate
-	print_filtered(str, &is_alphanum) // "Filtered"
+	print_filtered(str, is_alphanum) // "Filtered"
 	0
 }

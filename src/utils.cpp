@@ -33,7 +33,9 @@ static unsigned int parse_pos_int(char *num_str, size_t num_str_len,
                                                : num_str[i] - '0');
   return result;
 }
-static char *num_to_str(unsigned int num, unsigned short base = 10) {
+static const char *num_to_str(unsigned int num, unsigned short base = 10) {
+  if (num == 0)
+    return "0";
   size_t len = log(num) / log(base) + 1;
   char *buf = alloc_c(len);
   for (size_t i = len; i > 0; i--) {
@@ -46,12 +48,14 @@ static char *num_to_str(unsigned int num, unsigned short base = 10) {
 
 size_t unnamed_acc = 0;
 // incrementing base52 (a-zA-Z) number for unnamed symbols
-char *next_unnamed() {
+const char *next_unnamed() {
   size_t num = unnamed_acc++;
-  size_t len = log(unnamed_acc) / log(52) + 1;
+  if (num == 0)
+    return "a"; // log(0) would fail so shortcut with correct result
+  size_t len = log(num) / log(52) + 1;
   char *buf = alloc_c(len);
   for (size_t i = len; i > 0; i--) {
-    size_t curr = unnamed_acc % 52;
+    unsigned short curr = num % 52;
     num /= 52;
     buf[i - 1] = curr < 26 ? curr + 'a' : curr + 'A' - 26;
   }

@@ -259,15 +259,15 @@ static ExprAST *parse_block() {
   eat('{');
   ExprAST **exprs = alloc_arr<ExprAST *>(MAX_EXPRS);
   unsigned int expr_i = 0;
-  for (; curr_token != '}'; expr_i++)
+  while (curr_token != '}')
     if (curr_token == T_EOF)
       error("unclosed block");
     else if (expr_i > MAX_EXPRS)
       error("too many exprs in block (>1024)");
     else if (curr_token == ';')
-      continue; // ignore ;
+      eat(';'); // ignore ;
     else
-      exprs[expr_i] = parse_expr();
+      exprs[expr_i++] = parse_expr();
   exprs = (ExprAST **)realloc_arr<ExprAST *>(exprs, expr_i);
   eat('}');
   return new BlockExprAST(exprs, expr_i);

@@ -49,7 +49,7 @@ NumType *num_char_to_type(char type_char, bool has_dot) {
 }
 /// NumberExprAST - Expression class for numeric literals like "1.0".
 class NumberExprAST : public ExprAST {
-  char *val;
+  const char *val;
   size_t val_len;
   unsigned int base;
   NumType *type;
@@ -60,7 +60,7 @@ public:
       : val(val), val_len(val_len), base(base) {
     type = num_char_to_type(type_char, has_dot);
   }
-  NumberExprAST(int val, char type_char) : base(10) {
+  NumberExprAST(unsigned int val, char type_char) : base(10) {
     type = num_char_to_type(type_char, false);
     this->val = num_to_str(val);
     this->val_len = log10(val) + 1;
@@ -570,6 +570,7 @@ public:
 /// PropAccessExprAST - Expression class for accessing properties (a.size).
 class PropAccessExprAST : public ExprAST {
   ExprAST *source;
+  bool is_ptr;
   StructType *source_type;
   unsigned int index;
   char *key;
@@ -578,8 +579,12 @@ class PropAccessExprAST : public ExprAST {
 public:
   PropAccessExprAST(char *key, size_t name_len, ExprAST *source)
       : key(key), source(source) {
-    source_type = dynamic_cast<StructType *>(
-        dynamic_cast<PointerType *>(source->get_type())->get_points_to());
+    Type *st = source->get_type();
+    if (st->type_type() == TypeType::Pointer) {
+      st = dynamic_cast<PointerType *>(source->get_type())->get_points_to();
+      is_ptr = true;
+    }
+    source_type = dynamic_cast<StructType *>(st);
     index = source_type->get_index(key, name_len);
     type = source_type->get_elem_type(index);
   }
@@ -587,10 +592,14 @@ public:
   Type *get_type() { return type; }
 
   Value *gen_value() {
-    return new BasicLoadValue(
-        LLVMBuildStructGEP2(curr_builder, source_type->llvm_type(),
-                            source->gen_value()->gen_val(), index, key),
-        type);
+    Value *src = source->gen_value();
+    // If src is a struct-pointer (*String) then access on the value, if src is
+    // a struct-value (String) then access on the pointer to where it's stored.
+    LLVMValueRef struct_ptr = is_ptr ? src->gen_val() : src->gen_ptr();
+    return new BasicLoadValue(LLVMBuildStructGEP2(curr_builder,
+                                                  source_type->llvm_type(),
+                                                  struct_ptr, index, key),
+                              type);
   }
 };
 
@@ -600,13 +609,12 @@ struct CompleteExtensionName {
 };
 CompleteExtensionName get_complete_extension_name(Type *base_type, char *name,
                                                   size_t name_len) {
-  const char *called_type = base_type->stringify();
+  char *called_type = LLVMPrintTypeToString(base_type->llvm_type());
   CompleteExtensionName cen;
-  cen.len = 4 + strlen(called_type) + name_len;
+  cen.len = 2 + strlen(called_type) + name_len;
   cen.str = alloc_c(cen.len);
-  strcpy(cen.str, "(");
   strcat(cen.str, called_type);
-  strcat(cen.str, ")::");
+  strcat(cen.str, "::");
   strcat(cen.str, name);
   return cen;
 }
@@ -967,7 +975,7 @@ public:
     if (LLVMCountBasicBlocks(func) != 0)
       error("Function cannot be redefined.");
 
-    auto block = LLVMAppendBasicBlockInContext(curr_ctx, func, UN);
+    auto block = LLVMAppendBasicBlockInContext(curr_ctx, func, "");
     LLVMPositionBuilderAtEnd(curr_builder, block);
     size_t args_len = LLVMCountParams(func);
     LLVMValueRef *params = alloc_arr<LLVMValueRef>(args_len);

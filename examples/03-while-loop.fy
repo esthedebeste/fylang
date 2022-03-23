@@ -6,7 +6,6 @@ fun main() {
 	const str = "Hello World!"
 	const len = str.length()
 	let i = 0
-	// Iterate over all the characters in `str`, printing each individually. 
 	while (i < len) {
 		eputc(str[i])
 		i += 1

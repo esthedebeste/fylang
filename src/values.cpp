@@ -103,6 +103,11 @@ LLVMValueRef gen_num_cast(LLVMValueRef value, NumType *a, Type *b) {
       return LLVMBuildFPCast(curr_builder, value, num->llvm_type(), UN);
     return LLVMBuildIntCast2(curr_builder, value, num->llvm_type(),
                              num->is_signed, UN);
+  } else if (b->type_type() == TypeType::Pointer) {
+    if (a->byte_size == LLVMPointerSize(target_data))
+      return LLVMBuildBitCast(curr_builder, value, b->llvm_type(), UN);
+    else
+      error("Can only cast a pointersize number to a pointer");
   }
   error("Numbers can't be casted to non-numbers yet");
 }
@@ -110,6 +115,12 @@ LLVMValueRef gen_num_cast(LLVMValueRef value, NumType *a, Type *b) {
 LLVMValueRef gen_ptr_cast(LLVMValueRef value, PointerType *a, Type *b) {
   if (PointerType *ptr = dynamic_cast<PointerType *>(b))
     return LLVMBuildPointerCast(curr_builder, value, ptr->llvm_type(), UN);
+  else if (NumType *num = dynamic_cast<NumType *>(b)) {
+    if (num->byte_size == LLVMPointerSize(target_data))
+      return LLVMBuildBitCast(curr_builder, value, b->llvm_type(), UN);
+    else
+      error("Can't cast a pointer to a non-pointersize number");
+  }
   error("Pointers can't be casted to non-pointers yet");
 }
 
@@ -131,6 +142,8 @@ LLVMValueRef gen_arr_cast(LLVMValueRef value, TupleType *a, Type *b) {
 }
 
 LLVMValueRef cast(LLVMValueRef source, Type *src, Type *to) {
+  if (src->eq(to))
+    return source;
   if (NumType *num = dynamic_cast<NumType *>(src))
     return gen_num_cast(source, num, to);
   if (PointerType *ptr = dynamic_cast<PointerType *>(src))
