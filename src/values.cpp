@@ -1,6 +1,7 @@
 #pragma once
 #include "types.cpp"
 #include "utils.cpp"
+class CastValue;
 /// Variable - Base class for variable info.
 class Value {
 public:
@@ -8,7 +9,7 @@ public:
   virtual LLVMValueRef gen_val() = 0;
   virtual LLVMValueRef gen_ptr() = 0;
   virtual bool has_ptr() { return true; }
-  Value *cast_to(Type *type);
+  CastValue *cast_to(Type *type);
 };
 /// ConstValue - Constant value with no pointer.
 class ConstValue : public Value {
@@ -168,7 +169,7 @@ public:
   }
   bool has_ptr() { return source->has_ptr(); }
 };
-Value *Value::cast_to(Type *to) { return new CastValue(this, to); }
+CastValue *Value::cast_to(Type *to) { return new CastValue(this, to); }
 
 class NamedValue : public Value {
 public:

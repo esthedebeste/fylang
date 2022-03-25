@@ -17,6 +17,7 @@ extern "C" {
 }
 
 bool DEBUG = false;
+bool QUIET = false;
 char *std_dir;
 enum Token : const int {
   T_EOF = -0xffff, // end of file

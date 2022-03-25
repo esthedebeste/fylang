@@ -627,11 +627,17 @@ public:
                     ExprAST **args, size_t args_len) {
     CompleteExtensionName cen =
         get_complete_extension_name(source->get_type(), name, name_len);
-    VariableExprAST *called_function = new VariableExprAST(cen.str, cen.len);
-    ExprAST **args_with_this = realloc_arr<ExprAST *>(args, args_len + 1);
-    args_with_this[args_len] = source;
-    underlying_call =
-        new CallExprAST(called_function, args_with_this, args_len + 1);
+    if (curr_named_var_types[std::string(cen.str, cen.len)]) {
+      VariableExprAST *called_function = new VariableExprAST(cen.str, cen.len);
+      ExprAST **args_with_this = realloc_arr<ExprAST *>(args, args_len + 1);
+      args_with_this[args_len] = source;
+      underlying_call =
+          new CallExprAST(called_function, args_with_this, args_len + 1);
+    } else {
+      // call stored pointer to function
+      auto prop = new PropAccessExprAST(name, name_len, source);
+      underlying_call = new CallExprAST(prop, args, args_len);
+    }
   }
 
   Type *get_type() { return underlying_call->get_type(); }

@@ -15,7 +15,8 @@ public:
   }
   char next_char() {
     if (ended) {
-      fputs("[EOF]", stderr);
+      if (!QUIET)
+        fputs("[EOF]", stderr);
       return EOF;
     }
     if (n == 0) {
@@ -26,7 +27,7 @@ public:
     if (ret == EOF) {
       ended = true;
       return ' ';
-    } else
+    } else if (!QUIET)
       fputc(ret, stderr);
     return ret;
   }

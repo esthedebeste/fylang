@@ -94,6 +94,8 @@ int main(int argc, char **argv) {
 
   if (getenv("DEBUG"))
     DEBUG = true;
+  if (getenv("QUIET"))
+    QUIET = true;
   std_dir = get_relative_path(argv[0], (char *)"../lib");
   // host machine triple
   char *target_triple = LLVMGetDefaultTargetTriple();

@@ -277,7 +277,7 @@ static LetExprAST *parse_let_expr(bool global = false) {
   bool constant = false;
   if (curr_token == T_CONST) {
     constant = true;
-    get_next_token();
+    eat(T_CONST);
   } else
     eat(T_LET, (char *)"let");
   char *id = identifier_string;
