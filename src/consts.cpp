@@ -59,6 +59,7 @@ enum Token : const int {
   T_PERCENTEQ,     // %=
   T_ANDEQ,         // &=
   T_OREQ,          // |=
+  T_DUMP,          // DUMP
 };
 
 static LLVMContextRef curr_ctx;

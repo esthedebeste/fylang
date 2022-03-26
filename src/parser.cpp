@@ -86,13 +86,29 @@ static TypeDefAST *parse_type_definition() {
   return new TypeDefAST(name, name_len, t);
 }
 
+static Type *parse_tuple_type() {
+  eat('{');
+  Type **types = alloc_arr<Type *>(512);
+  unsigned int len = 0;
+  if (curr_token != '}')
+    while (1) {
+      types[len++] = parse_type_unary();
+      if (curr_token == '}')
+        break;
+      eat(',');
+    }
+  eat('}');
+  return new TupleType(types, len);
+}
 static Type *parse_type_unary() {
-  if (curr_token == T_FUNCTION)
+  switch (curr_token) {
+  case T_FUNCTION:
     return parse_function_type();
-  if (curr_token == T_TYPEOF) {
+  case '{':
+    return parse_tuple_type();
+  case T_TYPEOF:
     eat(T_TYPEOF);
-    auto expr = parse_expr();
-    return expr->get_type();
+    return parse_expr()->get_type();
   }
   // If the current token is not a unary type operator, just parse type
   if (!(curr_token == '&' || curr_token == '*' || curr_token == T_UNSIGNED))
@@ -143,7 +159,7 @@ static Type *parse_type_postfix() {
         error("List lengths have to be integers");
       eat(T_NUMBER);
       eat(']');
-      prev = new TupleType(prev, parse_pos_int(num, num_len, 10));
+      prev = new ArrayType(prev, parse_pos_int(num, num_len, 10));
     }
     default:
       return prev;
@@ -171,6 +187,21 @@ static ExprAST *parse_string_expr() {
 static ExprAST *parse_paren_expr() {
   eat('(');
   auto expr = parse_expr();
+  if (curr_token == ',') {
+    eat(',');
+    ExprAST **exprs = alloc_arr<ExprAST *>(512);
+    size_t length = 1;
+    exprs[0] = expr;
+    if (curr_token != ')')
+      while (1) {
+        exprs[length++] = parse_expr();
+        if (curr_token == ')')
+          break;
+        eat(',');
+      }
+    eat(')');
+    return new TupleExprAST(exprs, length);
+  }
   eat(')');
   return expr;
 }
@@ -229,6 +260,14 @@ static ExprAST *parse_for_expr() {
 /// newexpr ::= 'new' type '{' (identifier '=' expr ',')* '}'
 static ExprAST *parse_new_expr() {
   eat(T_NEW, (char *)"new");
+  if (curr_token == '(') {
+    // tuple on heap
+    TupleExprAST *tuple = dynamic_cast<TupleExprAST *>(parse_paren_expr());
+    if (tuple == nullptr)
+      error("new tuple not a tuple, add a comma to the end");
+    tuple->use_malloc = true;
+    return tuple;
+  }
   auto type = dynamic_cast<StructType *>(parse_num_type());
   if (!type)
     error("new with non-struct value");
@@ -340,6 +379,10 @@ static ExprAST *parse_primary() {
   case T_TRUE:
   case T_FALSE:
     return parse_bool_expr();
+  case T_DUMP:
+    eat(T_DUMP);
+    fprintf(stderr, "[DUMP] Dumped type: %s", parse_type_unary()->stringify());
+    return parse_primary();
   case '{':
     return parse_block();
   }
@@ -388,15 +431,21 @@ static ExprAST *parse_postfix() {
       return prev;
     case '.': {
       eat('.');
-      char *id = identifier_string;
-      size_t id_len = identifier_string_length;
-      eat(T_IDENTIFIER, (char *)"identifier");
-      if (curr_token == '(') {
-        ParseCallResult call = parse_call();
-        prev =
-            new MethodCallExprAST(id, id_len, prev, call.args, call.args_len);
-      } else
-        prev = new PropAccessExprAST(id, id_len, prev);
+      if (curr_token == T_NUMBER) {
+        unsigned int idx = parse_pos_int(num_value, num_length, 10);
+        eat(T_NUMBER);
+        prev = new PropAccessExprAST(idx, prev);
+      } else {
+        char *id = identifier_string;
+        size_t id_len = identifier_string_length;
+        eat(T_IDENTIFIER, (char *)"identifier");
+        if (curr_token == '(') {
+          ParseCallResult call = parse_call();
+          prev =
+              new MethodCallExprAST(id, id_len, prev, call.args, call.args_len);
+        } else
+          prev = new PropAccessExprAST(id, id_len, prev);
+      }
       break;
     }
     case '(': {

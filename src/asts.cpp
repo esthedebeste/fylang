@@ -211,7 +211,7 @@ public:
 class StringExprAST : public ExprAST {
   char *chars;
   size_t length;
-  TupleType *t_type;
+  ArrayType *t_type;
   PointerType *p_type;
 
 public:
@@ -221,7 +221,7 @@ public:
             "last null-byte");
     if (!char_type)
       char_type = new NumType(8, false, false);
-    t_type = new TupleType(char_type, length);
+    t_type = new ArrayType(char_type, length);
     p_type = new PointerType(char_type);
   }
   Type *get_type() { return p_type; }
@@ -545,7 +545,7 @@ public:
     Type *base_type = value->get_type();
     if (PointerType *p_type = dynamic_cast<PointerType *>(base_type))
       type = p_type->get_points_to();
-    else if (TupleType *arr_type = dynamic_cast<TupleType *>(base_type))
+    else if (ArrayType *arr_type = dynamic_cast<ArrayType *>(base_type))
       type = arr_type->get_elem_type();
     else {
       fprintf(stderr,
@@ -571,7 +571,7 @@ public:
 class PropAccessExprAST : public ExprAST {
   ExprAST *source;
   bool is_ptr;
-  StructType *source_type;
+  TupleType *source_type;
   unsigned int index;
   char *key;
   Type *type;
@@ -584,8 +584,19 @@ public:
       st = dynamic_cast<PointerType *>(source->get_type())->get_points_to();
       is_ptr = true;
     }
-    source_type = dynamic_cast<StructType *>(st);
-    index = source_type->get_index(key, name_len);
+    StructType *struct_t = dynamic_cast<StructType *>(st);
+    index = struct_t->get_index(key, name_len);
+    type = struct_t->get_elem_type(index);
+    source_type = struct_t;
+  }
+  PropAccessExprAST(unsigned int idx, ExprAST *source)
+      : index(idx), source(source) {
+    Type *st = source->get_type();
+    if (st->type_type() == TypeType::Pointer) {
+      st = dynamic_cast<PointerType *>(source->get_type())->get_points_to();
+      is_ptr = true;
+    }
+    source_type = dynamic_cast<TupleType *>(st);
     type = source_type->get_elem_type(index);
   }
 
@@ -598,7 +609,7 @@ public:
     LLVMValueRef struct_ptr = is_ptr ? src->gen_val() : src->gen_ptr();
     return new BasicLoadValue(LLVMBuildStructGEP2(curr_builder,
                                                   source_type->llvm_type(),
-                                                  struct_ptr, index, key),
+                                                  struct_ptr, index, UN),
                               type);
   }
 };
@@ -667,20 +678,47 @@ public:
   Type *get_type() { return p_type; }
 
   Value *gen_value() {
-    LLVMValueRef func = LLVMGetNamedFunction(curr_module, "malloc");
-    if (!func)
-      error("malloc needs to be declared to use `new`");
-    LLVMValueRef bytes = LLVMSizeOf(s_type->llvm_type());
-    LLVMValueRef ptr = LLVMBuildCall2(
-        curr_builder, curr_named_var_types["malloc"]->llvm_type(), func, &bytes,
-        1, UN);
-    ptr = LLVMBuildBitCast(curr_builder, ptr, p_type->llvm_type(), "newalloc");
+    LLVMValueRef ptr =
+        LLVMBuildMalloc(curr_builder, s_type->llvm_type(), "malloc");
     for (unsigned int i = 0; i < key_count; i++) {
       LLVMValueRef llvm_indexes[2] = {
           LLVMConstInt(LLVMInt32Type(), 0, false),
           LLVMConstInt(LLVMInt32Type(), indexes[i], false)};
       LLVMValueRef set_ptr = LLVMBuildStructGEP2(
           curr_builder, s_type->llvm_type(), ptr, indexes[i], "tmpgep");
+      LLVMBuildStore(curr_builder, values[i]->gen_value()->gen_val(), set_ptr);
+    }
+    return new ConstValue(p_type, ptr);
+  }
+};
+
+class TupleExprAST : public ExprAST {
+  TupleType *type;
+  PointerType *p_type;
+  ExprAST **values;
+  size_t length;
+
+public:
+  bool use_malloc;
+  TupleExprAST(ExprAST **values, size_t length)
+      : values(values), length(length) {
+    Type **types = alloc_arr<Type *>(length);
+    for (size_t i = 0; i < length; i++)
+      types[i] = values[i]->get_type();
+    type = new TupleType(types, length);
+    p_type = new PointerType(type);
+  }
+
+  Type *get_type() { return p_type; }
+
+  Value *gen_value() {
+    LLVMValueRef ptr = (use_malloc ? LLVMBuildMalloc : LLVMBuildAlloca)(
+        curr_builder, type->llvm_type(), use_malloc ? "malloc" : "alloca");
+    for (size_t i = 0; i < length; i++) {
+      LLVMValueRef llvm_indexes[2] = {LLVMConstInt(LLVMInt32Type(), 0, false),
+                                      LLVMConstInt(LLVMInt32Type(), i, false)};
+      LLVMValueRef set_ptr = LLVMBuildStructGEP2(
+          curr_builder, type->llvm_type(), ptr, i, "tmpgep");
       LLVMBuildStore(curr_builder, values[i]->gen_value()->gen_val(), set_ptr);
     }
     return new ConstValue(p_type, ptr);

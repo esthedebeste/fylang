@@ -123,6 +123,8 @@ static int next_token() {
       return T_RETURN;
     else if (T_eq("for"))
       return T_FOR;
+    else if (T_eq("DUMP"))
+      return T_DUMP;
 #undef T_eq
     return T_IDENTIFIER;
   } else if (isdigit(last_char)) {

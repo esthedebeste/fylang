@@ -8,10 +8,14 @@ fun stack(): Num {
     b.x = 2
     b
 }
+fun tuple() 
+   *(3, )
 
 fun main() {
     let a: *Num = heap()
     eputn(a.x)
     let b: Num = stack()
     eputn(b.x)
+    let b = tuple()
+    eputn(b.0)
 }

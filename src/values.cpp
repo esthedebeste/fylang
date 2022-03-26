@@ -125,11 +125,11 @@ LLVMValueRef gen_ptr_cast(LLVMValueRef value, PointerType *a, Type *b) {
   error("Pointers can't be casted to non-pointers yet");
 }
 
-LLVMValueRef gen_arr_cast(LLVMValueRef value, TupleType *a, Type *b) {
+LLVMValueRef gen_arr_cast(LLVMValueRef value, ArrayType *a, Type *b) {
   if (PointerType *ptr = dynamic_cast<PointerType *>(b)) {
     if (ptr->get_points_to()->neq(a->get_elem_type())) {
       ptr->get_points_to()->log_diff(a->get_elem_type());
-      error("Tuple can't be casted to pointer with different type");
+      error("Array can't be casted to pointer with different type");
     }
     LLVMValueRef zeros[2] = {
         LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false),
@@ -149,9 +149,10 @@ LLVMValueRef cast(LLVMValueRef source, Type *src, Type *to) {
     return gen_num_cast(source, num, to);
   if (PointerType *ptr = dynamic_cast<PointerType *>(src))
     return gen_ptr_cast(source, ptr, to);
-  if (TupleType *tup = dynamic_cast<TupleType *>(src))
+  if (ArrayType *tup = dynamic_cast<ArrayType *>(src))
     return gen_arr_cast(source, tup, to);
-  error("Invalid cast");
+  fprintf(stderr, "Invalid cast (%s to %s)", src->stringify(), to->stringify());
+  exit(1);
 }
 
 class CastValue : public Value {

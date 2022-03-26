@@ -4,14 +4,7 @@
 static LLVMTypeRef void_type =
     LLVMStructCreateNamed(LLVMGetGlobalContext(), "void");
 
-enum TypeType {
-  Void = 0,
-  Number = 1,
-  Pointer = 2,
-  Function = 3,
-  Tuple = 4,
-  Struct = 5
-};
+enum TypeType { Void, Number, Pointer, Function, Array, Struct, Tuple };
 static const char *tt_to_str(TypeType tt) {
   switch (tt) {
   case Void:
@@ -22,10 +15,12 @@ static const char *tt_to_str(TypeType tt) {
     return "pointer";
   case Function:
     return "function";
-  case Tuple:
+  case Array:
     return "tuple";
   case Struct:
     return "struct";
+  case Tuple:
+    return "nameless struct";
   }
 };
 /// Base type class.
@@ -129,17 +124,17 @@ public:
     return str;
   }
 };
-class TupleType : public Type {
+class ArrayType : public Type {
 public:
   Type *elem;
   unsigned int count;
-  TupleType(Type *elem, unsigned int count) : elem(elem), count(count) {}
+  ArrayType(Type *elem, unsigned int count) : elem(elem), count(count) {}
   Type *get_elem_type() { return elem; }
   unsigned int get_elem_count() { return count; }
   LLVMTypeRef llvm_type() { return LLVMArrayType(elem->llvm_type(), count); }
-  TypeType type_type() { return TypeType::Tuple; }
+  TypeType type_type() { return TypeType::Array; }
   bool eq(Type *other) {
-    if (TupleType *other_arr = dynamic_cast<TupleType *>(other))
+    if (ArrayType *other_arr = dynamic_cast<ArrayType *>(other))
       return other_arr->elem->eq(this->elem) && other_arr->count == this->count;
     return false;
   }
@@ -156,33 +151,71 @@ public:
     return str;
   }
 };
-class StructType : public Type {
-  LLVMTypeRef llvm_struct_type;
-
+class TupleType : public Type {
 public:
-  char *name;
-  size_t name_len;
+  LLVMTypeRef llvm_struct_type;
   Type **types;
-  char **keys;
-  size_t *key_lengths;
-  unsigned int count;
-  StructType(char *name, size_t name_len, char **keys, size_t *key_lengths,
-             Type **types, unsigned int count)
-      : name(name), name_len(name_len), keys(keys), key_lengths(key_lengths),
-        types(types), count(count) {
-    LLVMTypeRef *llvm_types = alloc_arr<LLVMTypeRef>(count);
-    for (unsigned int i = 0; i < count; i++)
+  size_t length;
+  TupleType(Type **types, size_t length) : types(types), length(length) {
+    LLVMTypeRef *llvm_types = alloc_arr<LLVMTypeRef>(length);
+    for (size_t i = 0; i < length; i++)
       llvm_types[i] = types[i]->llvm_type();
-    llvm_struct_type = LLVMStructCreateNamed(curr_ctx, name);
-    LLVMStructSetBody(llvm_struct_type, llvm_types, count, true);
+    llvm_struct_type = LLVMStructType(llvm_types, length, true);
   }
-  Type *get_elem_type(unsigned int index) {
-    if (index >= count)
+  Type *get_elem_type(size_t index) {
+    if (index >= length)
       error("Struct get_elem_type index out of bounds");
     return types[index];
   }
-  unsigned int get_index(char *name, size_t name_len) {
-    for (unsigned int i = 0; i < count; i++) {
+  LLVMTypeRef llvm_type() { return llvm_struct_type; }
+  TypeType type_type() { return TypeType::Tuple; }
+  bool eq(Type *other) {
+    if (TupleType *other_s = dynamic_cast<TupleType *>(other))
+      if (other_s->length == length) {
+        for (size_t i = 0; i < length; i++)
+          if (other_s->types[i]->neq(types[i]))
+            return false;
+        return true;
+      }
+    return false;
+  }
+  const char *stringify() {
+    size_t len = 4;
+    size_t *lens = alloc_arr<size_t>(length);
+    const char **strs = alloc_arr<const char *>(length);
+    for (size_t i = 0; i < length; i++) {
+      strs[i] = types[i]->stringify();
+      len += lens[i] = strlen(strs[i]);
+    }
+    len += length * 2;
+    char *buf = alloc_arr<char>(len);
+    strcpy(buf, "{ ");
+    for (size_t i = 0; i < length; i++) {
+      strncat(buf, strs[i], lens[i]);
+      strncat(buf, ", ", 2);
+    }
+    strncat(buf, " }", 2);
+    return buf;
+  }
+};
+class StructType : public TupleType {
+public:
+  char *name;
+  size_t name_len;
+  char **keys;
+  size_t *key_lengths;
+  StructType(char *name, size_t name_len, char **keys, size_t *key_lengths,
+             Type **types, size_t length)
+      : TupleType(types, length), name(name), name_len(name_len), keys(keys),
+        key_lengths(key_lengths) {
+    LLVMTypeRef *llvm_types = alloc_arr<LLVMTypeRef>(length);
+    for (size_t i = 0; i < length; i++)
+      llvm_types[i] = types[i]->llvm_type();
+    llvm_struct_type = LLVMStructCreateNamed(curr_ctx, name);
+    LLVMStructSetBody(llvm_struct_type, llvm_types, length, true);
+  }
+  size_t get_index(char *name, size_t name_len) {
+    for (size_t i = 0; i < length; i++) {
       if (key_lengths[i] == name_len) {
         for (size_t j = 0; j < name_len; j++)
           if (keys[i][j] != name[j])
