@@ -8,12 +8,11 @@ static int get_next_token() { return curr_token = next_token(); }
 static int eat(const int expected_token, const char *exp_name = nullptr) {
   if (curr_token != expected_token) {
     if (exp_name == nullptr)
-      fprintf(stderr, "Error: Unexpected token '%c' (%d), expected '%c'",
-              curr_token, curr_token, expected_token);
+      error("Error: Unexpected token '%c' (%d), expected '%c'", curr_token,
+            curr_token, expected_token);
     else
-      fprintf(stderr, "Error: Unexpected token '%c' (%d), expected '%s'",
-              curr_token, curr_token, exp_name);
-    exit(1);
+      error("Error: Unexpected token '%c' (%d), expected '%s'", curr_token,
+            curr_token, exp_name);
   } else
     return get_next_token();
 }
@@ -68,10 +67,7 @@ static Type *parse_num_type() {
   else if (streq_lit(id, id_len, "void")) return new VoidType();
   else if (curr_named_types[std::string(
                id, id_len)]) return curr_named_types[std::string(id, id_len)];
-  else {
-    fprintf(stderr, "Error: invalid type '%s'", id);
-    exit(1);
-  }
+  else error("invalid type '%s'", id);
 #undef strlen
 #undef check_type
 }
@@ -351,10 +347,8 @@ static BoolExprAST *parse_bool_expr() {
 static ExprAST *parse_primary() {
   switch (curr_token) {
   default:
-    fprintf(stderr,
-            "Error: unknown token '%c' (%d) when expecting an expression",
-            curr_token, curr_token);
-    exit(1);
+    error("Error: unknown token '%c' (%d) when expecting an expression",
+          curr_token, curr_token);
   case T_IDENTIFIER:
     return parse_identifier_expr();
   case T_NUMBER:
@@ -381,7 +375,7 @@ static ExprAST *parse_primary() {
     return parse_bool_expr();
   case T_DUMP:
     eat(T_DUMP);
-    fprintf(stderr, "[DUMP] Dumped type: %s", parse_type_unary()->stringify());
+    printf("[DUMP] Dumped type: %s", parse_type_unary()->stringify());
     return parse_primary();
   case '{':
     return parse_block();
@@ -475,6 +469,16 @@ static ExprAST *parse_postfix() {
 ///   ::= primary
 ///   ::= '!' unary
 static ExprAST *parse_unary() {
+  if (curr_token == T_SIZEOF) {
+    eat(T_SIZEOF);
+    bool paren = curr_token == '(';
+    if (paren)
+      eat('(');
+    Type *type = parse_type_unary();
+    if (paren)
+      eat(')');
+    return new SizeofExprAST(type);
+  }
   // If the current token is not an operator, it must be a primary expr.
   if (curr_token != T_RETURN && !isascii(curr_token) || curr_token == '(' ||
       curr_token == ',' || curr_token == '{')
@@ -548,7 +552,7 @@ static PrototypeAST *parse_prototype(Type *default_return_type = nullptr) {
   eat('(');
 
   // Read the list of argument names.
-  char **arg_names = alloc_arr<char *>(64);
+  const char **arg_names = alloc_arr<const char *>(64);
   size_t *arg_name_lens = alloc_arr<size_t>(64);
   Type **arg_types = alloc_arr<Type *>(64);
   unsigned int arg_count = 0;
@@ -657,11 +661,8 @@ static char *parse_include() {
   eat(T_INCLUDE, (char *)"include");
   char *path = string_value;
   if (curr_token != T_STRING) {
-    fprintf(
-        stderr,
-        "Error: Unexpected token after 'include': '%c' (%d), expected string",
-        curr_token, curr_token);
-    exit(1);
+    error("Error: Unexpected token after 'include': '%c' (%d), expected string",
+          curr_token, curr_token);
   }
   return path;
 }

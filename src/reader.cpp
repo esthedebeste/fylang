@@ -82,8 +82,7 @@ CharReader *get_file(char *base_path, char *relative_path) {
     if (file)
       return new CharReader(file, abs);
   }
-  fprintf(stderr, "File \'%s\' can't be resolved", relative_path);
-  exit(1);
+  error("File \'%s\' can't be resolved", relative_path);
 }
 
 static void add_file_to_queue(char *base_path, char *relative_path) {

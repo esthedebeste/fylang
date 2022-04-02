@@ -10,4 +10,3 @@ fun main() {
 		eputs("`str` is empty!")
 	0
 }
-

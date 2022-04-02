@@ -15,7 +15,6 @@ extern "C" {
 #include "llvm-c/TargetMachine.h"
 #include "llvm-c/Transforms/PassBuilder.h"
 }
-
 bool DEBUG = false;
 bool QUIET = false;
 char *std_dir;
@@ -49,6 +48,7 @@ enum Token : const int {
   T_AS,            // as
   T_VARARG,        // __VARARG__
   T_TYPEOF,        // typeof
+  T_SIZEOF,        // sizeof
   T_TRUE,          // true
   T_FALSE,         // false
   T_FOR,           // for

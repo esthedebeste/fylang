@@ -77,8 +77,11 @@ public:
   LLVMValueRef gen_ptr() {
     if (ptr)
       return ptr;
-    else
-      error("conditional does not have a pointer-ish value on both sides");
+    LLVMValueRef incoming_v[2] = {a_v->gen_ptr(), b_v->gen_ptr()};
+    LLVMBasicBlockRef incoming_bb[2] = {a_bb, b_bb};
+    LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), UN);
+    LLVMAddIncoming(phi, incoming_v, incoming_bb, 2);
+    return ptr = phi;
   }
   bool has_ptr() { return ptr != nullptr; }
 };
@@ -127,10 +130,10 @@ LLVMValueRef gen_ptr_cast(LLVMValueRef value, PointerType *a, Type *b) {
 
 LLVMValueRef gen_arr_cast(LLVMValueRef value, ArrayType *a, Type *b) {
   if (PointerType *ptr = dynamic_cast<PointerType *>(b)) {
-    if (ptr->get_points_to()->neq(a->get_elem_type())) {
-      ptr->get_points_to()->log_diff(a->get_elem_type());
-      error("Array can't be casted to pointer with different type");
-    }
+    if (ptr->get_points_to()->neq(a->get_elem_type()))
+      error("Array can't be casted to pointer with different type, %s does not "
+            "match %s.",
+            ptr->get_points_to()->stringify(), a->get_elem_type()->stringify());
     LLVMValueRef zeros[2] = {
         LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false),
         LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false)};
@@ -151,8 +154,7 @@ LLVMValueRef cast(LLVMValueRef source, Type *src, Type *to) {
     return gen_ptr_cast(source, ptr, to);
   if (ArrayType *tup = dynamic_cast<ArrayType *>(src))
     return gen_arr_cast(source, tup, to);
-  fprintf(stderr, "Invalid cast (%s to %s)", src->stringify(), to->stringify());
-  exit(1);
+  error("Invalid cast (%s to %s)", src->stringify(), to->stringify());
 }
 
 class CastValue : public Value {

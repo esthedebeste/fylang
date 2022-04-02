@@ -7,7 +7,7 @@ fun print_filtered(str: *char, predicate: *fun(char): bool) {
 	const len = strlen(str)
 	for(let i = 0; i < len; i += 1) {
 		let char = str[i]
-		if(predicate(char)) 
+		if(predicate(char))
 			eputc(char)
 	}
 }

@@ -3,11 +3,6 @@
 #include "utils.cpp"
 #include "values.cpp"
 
-// Includes function arguments
-static std::map<std::string, Value *> curr_named_variables;
-static std::map<std::string, Type *> curr_named_var_types;
-static std::map<std::string, Type *> curr_named_types;
-
 class TopLevelAST {
 public:
   virtual LLVMValueRef gen_toplevel() = 0;
@@ -19,6 +14,14 @@ public:
   virtual Type *get_type() = 0;
   virtual Value *gen_value() = 0;
 };
+
+struct ValueAndType {
+  Value *value;
+  Type *type;
+  ValueAndType(Type *type) : type(type) {}
+};
+static std::map<std::string, ValueAndType *> curr_named_variables;
+static std::map<std::string, Type *> curr_named_types;
 
 NumType *num_char_to_type(char type_char, bool has_dot) {
   switch (type_char) {
@@ -43,8 +46,7 @@ NumType *num_char_to_type(char type_char, bool has_dot) {
       error("'b' (byte, uint8) type can't have a '.'");
     return new NumType(8, false, false);
   default:
-    fprintf(stderr, "Error: Invalid number type id '%c'", type_char);
-    exit(1);
+    error("Invalid number type id '%c'", type_char);
   }
 }
 /// NumberExprAST - Expression class for numeric literals like "1.0".
@@ -110,23 +112,16 @@ public:
 
 /// VariableExprAST - Expression class for referencing a variable, like "a".
 class VariableExprAST : public ExprAST {
-  char *name;
-  size_t name_len;
-  Type *type;
+  ValueAndType *vt;
 
 public:
-  VariableExprAST(char *name, size_t name_len)
-      : name(name), name_len(name_len) {
-    type = curr_named_var_types[name];
-    if (!type) {
-      fprintf(stderr, "Error: Variable '%s' doesn't exist.", name);
-      exit(1);
-    }
+  VariableExprAST(char *name, size_t name_len) {
+    vt = curr_named_variables[std::string(name, name_len)];
+    if (!vt)
+      error("Variable '%s' doesn't exist.", name);
   }
-  Type *get_type() { return type; }
-  Value *gen_value() {
-    return curr_named_variables[std::string(name, name_len)];
-  }
+  Type *get_type() { return vt->type; }
+  Value *gen_value() { return vt->value; }
 };
 
 /// LetExprAST - Expression class for creating a variable, like "let a = 3".
@@ -143,9 +138,10 @@ public:
              bool global)
       : id(id), id_len(id_len), constant(constant), global(global) {
     if (type)
-      curr_named_var_types[std::string(id, id_len)] = type;
+      curr_named_variables[std::string(id, id_len)] = new ValueAndType(type);
     else if (value != nullptr)
-      curr_named_var_types[std::string(id, id_len)] = type = value->get_type();
+      curr_named_variables[std::string(id, id_len)] =
+          new ValueAndType(type = value->get_type());
     else
       error("Untyped valueless variable");
     this->type = type;
@@ -161,14 +157,14 @@ public:
       else
         error("Global variable needs a constant value inside it");
     }
-    curr_named_variables[std::string(id, id_len)] =
+    curr_named_variables[std::string(id, id_len)]->value =
         new BasicLoadValue(ptr, type);
     return ptr;
   }
   Value *gen_value() {
     if (constant) {
       if (value)
-        return curr_named_variables[std::string(id, id_len)] =
+        return curr_named_variables[std::string(id, id_len)]->value =
                    new NamedValue(value->gen_value(), id, id_len);
       else
         error("Constant variables need an initialization value");
@@ -179,14 +175,30 @@ public:
       LLVMValueRef llvm_val = value->gen_value()->cast_to(type)->gen_val();
       LLVMBuildStore(curr_builder, llvm_val, ptr);
     }
-    return curr_named_variables[std::string(id, id_len)] =
+    return curr_named_variables[std::string(id, id_len)]->value =
                new BasicLoadValue(ptr, type);
   }
   LLVMValueRef gen_declare() {
     LLVMValueRef global = LLVMAddGlobal(curr_module, type->llvm_type(), id);
-    curr_named_variables[std::string(id, id_len)] =
+    curr_named_variables[std::string(id, id_len)]->value =
         new BasicLoadValue(global, type);
     return global;
+  }
+};
+
+NumType *sizeof_type;
+/// SizeofExprAST - Expression class to get the byte size of a type
+class SizeofExprAST : public ExprAST {
+  Type *type;
+
+public:
+  SizeofExprAST(Type *type) : type(type) {
+    if (!sizeof_type)
+      sizeof_type = new NumType(false); // uint_ptrsize
+  }
+  Type *get_type() { return sizeof_type; }
+  Value *gen_value() {
+    return new ConstValue(sizeof_type, LLVMSizeOf(type->llvm_type()));
   }
 };
 
@@ -238,16 +250,6 @@ public:
     LLVMValueRef cast = LLVMConstGEP2(t_type->llvm_type(), glob, zeros, 2);
     return new ConstValue(p_type, cast);
   }
-  // LLVMValueRef u_gen_load() {
-  //   return gen_variable((char *)".str", false)->gen_load();
-  // }
-  // Value *gen_variable(char *name, bool constant) {
-  //   LLVMValueRef str = LLVMConstString(chars, length, true);
-  //   LLVMValueRef glob = LLVMAddGlobal(curr_module, type->llvm_type(), name);
-  //   LLVMSetInitializer(glob, str);
-  //   LLVMSetGlobalConstant(glob, constant);
-  //   return new BasicLoadValue(glob, type);
-  // }
 };
 
 LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
@@ -288,8 +290,7 @@ LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
     case T_NEQ:
       return LLVMBuildFCmp(curr_builder, LLVMRealUNE, L, R, UN);
     default:
-      fprintf(stderr, "Error: invalid float_float binary operator '%c'", op);
-      exit(1);
+      error("Error: invalid float_float binary operator '%c'", op);
     }
   else if (!lhs_nt->is_floating && !rhs_nt->is_floating) {
     bool is_signed = lhs_nt->is_signed && rhs_nt->is_signed;
@@ -329,13 +330,10 @@ LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
     case T_NEQ:
       return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntNE, L, R, UN);
     default:
-      fprintf(stderr, "Error: invalid int_int binary operator '%c'", op);
-      exit(1);
+      error("invalid int_int binary operator '%c'", op);
     }
-  } else {
-    fprintf(stderr, "Error: invalid float_int binary operator '%c'", op);
-    exit(1);
-  }
+  } else
+    error("invalid float_int binary operator '%c'", op);
 }
 LLVMValueRef gen_ptr_num_binop(int op, LLVMValueRef ptr, LLVMValueRef num,
                                PointerType *ptr_t, NumType *num_t) {
@@ -351,8 +349,7 @@ LLVMValueRef gen_ptr_num_binop(int op, LLVMValueRef ptr, LLVMValueRef num,
     return LLVMBuildGEP2(curr_builder, ptr_t->points_to->llvm_type(), ptr, &num,
                          1, "ptraddtmp");
   default:
-    fprintf(stderr, "Error: invalid ptr_num binary operator '%c'", op);
-    exit(1);
+    error("invalid ptr_num binary operator '%c'", op);
   }
 }
 
@@ -477,8 +474,7 @@ public:
       LLVMBuildRet(curr_builder, val->gen_val());
       return val;
     default:
-      fprintf(stderr, "Error: invalid prefix unary operator '%c'", op);
-      exit(1);
+      error("invalid prefix unary operator '%c'", op);
     }
   }
 };
@@ -499,18 +495,13 @@ public:
     if (!func_t) {
       if (PointerType *ptr = dynamic_cast<PointerType *>(called->get_type()))
         func_t = dynamic_cast<FunctionType *>(ptr->get_points_to());
-      else {
-        fprintf(stderr, "Error: Function doesn't exist or is not a function");
-        exit(1);
-      }
+      else
+        error("Function doesn't exist or is not a function");
     }
     if (func_t->vararg ? args_len < func_t->arg_count
-                       : args_len != func_t->arg_count) {
-      fprintf(stderr,
-              "Error: Incorrect # arguments passed. (Expected %d, got %d)",
-              func_t->arg_count, (unsigned int)args_len);
-      exit(1);
-    }
+                       : args_len != func_t->arg_count)
+      error("Error: Incorrect # arguments passed. (Expected %d, got %d)",
+            func_t->arg_count, (unsigned int)args_len);
 
     type = func_t->return_type;
   }
@@ -547,13 +538,10 @@ public:
       type = p_type->get_points_to();
     else if (ArrayType *arr_type = dynamic_cast<ArrayType *>(base_type))
       type = arr_type->get_elem_type();
-    else {
-      fprintf(stderr,
-              "Invalid index, type not arrayish.\n"
-              "Expected: array | pointer \nGot: %s",
-              tt_to_str(base_type->type_type()));
-      exit(1);
-    }
+    else
+      error("Invalid index, type not arrayish.\n"
+            "Expected: array | pointer \nGot: %s",
+            tt_to_str(base_type->type_type()));
   }
 
   Type *get_type() { return type; }
@@ -638,7 +626,7 @@ public:
                     ExprAST **args, size_t args_len) {
     CompleteExtensionName cen =
         get_complete_extension_name(source->get_type(), name, name_len);
-    if (curr_named_var_types[std::string(cen.str, cen.len)]) {
+    if (curr_named_variables.count(std::string(cen.str, cen.len)) != 0) {
       VariableExprAST *called_function = new VariableExprAST(cen.str, cen.len);
       ExprAST **args_with_this = realloc_arr<ExprAST *>(args, args_len + 1);
       args_with_this[args_len] = source;
@@ -771,14 +759,10 @@ public:
     if (elze == nullptr)
       elze = new NullExprAST(type);
     Type *else_t = elze->get_type();
-    if (then_t->neq(else_t)) {
-      fprintf(
-          stderr,
-          "Error: conditional's then and else side don't have the same type, ");
-      then_t->log_diff(else_t);
-      fprintf(stderr, ".\n");
-      exit(1);
-    }
+    if (then_t->neq(else_t))
+      error("conditional's then and else side don't have the same "
+            "type, %s does not match %s.",
+            then_t->stringify(), else_t->stringify());
     this->elze = elze;
   }
 
@@ -912,32 +896,33 @@ public:
 /// number of arguments the function takes).
 class PrototypeAST {
 public:
-  char **arg_names;
+  const char **arg_names;
   size_t *arg_name_lengths;
   Type **arg_types;
   FunctionType *type;
   unsigned int arg_count;
   char *name;
   size_t name_len;
-  PrototypeAST(char *name, size_t name_len, char **arg_names,
+  PrototypeAST(char *name, size_t name_len, const char **arg_names,
                size_t *arg_name_lengths, Type **arg_types,
                unsigned int arg_count, Type *return_type, bool vararg)
       : name(name), name_len(name_len), arg_names(arg_names),
         arg_name_lengths(arg_name_lengths), arg_types(arg_types),
         arg_count(arg_count) {
     for (unsigned i = 0; i != arg_count; ++i)
-      curr_named_var_types[std::string(arg_names[i], arg_name_lengths[i])] =
-          arg_types[i];
-    curr_named_var_types[std::string(name, name_len)] = type =
-        new FunctionType(return_type, arg_types, arg_count, vararg);
+      curr_named_variables[std::string(arg_names[i], arg_name_lengths[i])] =
+          new ValueAndType(arg_types[i]);
+    curr_named_variables[std::string(name, name_len)] = new ValueAndType(
+        type = new FunctionType(return_type, arg_types, arg_count, vararg));
   }
-  PrototypeAST(Type *this_type, char *name, size_t name_len, char **arg_names,
-               size_t *arg_name_lengths, Type **arg_types,
-               unsigned int arg_count, Type *return_type, bool vararg) {
+  PrototypeAST(Type *this_type, char *name, size_t name_len,
+               const char **arg_names, size_t *arg_name_lengths,
+               Type **arg_types, unsigned int arg_count, Type *return_type,
+               bool vararg) {
     CompleteExtensionName cen =
         get_complete_extension_name(this_type, name, name_len);
     arg_count++;
-    arg_names = realloc_arr<char *>(arg_names, arg_count);
+    arg_names = realloc_arr<const char *>(arg_names, arg_count);
     arg_names[arg_count - 1] = strdup("this");
     arg_name_lengths = realloc_arr<size_t>(arg_name_lengths, arg_count);
     arg_name_lengths[arg_count - 1] = 4;
@@ -949,7 +934,7 @@ public:
   FunctionType *get_type() { return type; }
   LLVMValueRef codegen() {
     LLVMValueRef func = LLVMAddFunction(curr_module, name, type->llvm_type());
-    curr_named_variables[std::string(name, name_len)] =
+    curr_named_variables[std::string(name, name_len)]->value =
         new FuncValue(type, func);
     // Set names for all arguments.
     LLVMValueRef *params = alloc_arr<LLVMValueRef>(arg_count);
@@ -971,20 +956,15 @@ class DeclareExprAST : public TopLevelAST {
 public:
   DeclareExprAST(LetExprAST *let) : let(let) {
     type = let->get_type();
-    register_declare();
+    curr_named_variables[std::string(let->id, let->id_len)] =
+        new ValueAndType(type);
   }
   DeclareExprAST(PrototypeAST *prot) : prot(prot) {
     type = prot->get_type();
-    register_declare();
-  }
-  void register_declare() {
-    if (FunctionType *fun_t = dynamic_cast<FunctionType *>(type))
-      curr_named_var_types[std::string(prot->name, prot->name_len)] = fun_t;
-    else
-      curr_named_var_types[std::string(let->id, let->id_len)] = type;
+    curr_named_variables[std::string(prot->name, prot->name_len)] =
+        new ValueAndType(type);
   }
   LLVMValueRef gen_toplevel() {
-    register_declare();
     if (let)
       return let->gen_declare();
     else
@@ -1024,10 +1004,12 @@ public:
     size_t args_len = LLVMCountParams(func);
     LLVMValueRef *params = alloc_arr<LLVMValueRef>(args_len);
     LLVMGetParams(func, params);
-    size_t unused = 0;
-    for (unsigned i = 0; i != args_len; ++i)
-      curr_named_variables[LLVMGetValueName2(params[i], &unused)] =
+    for (unsigned i = 0; i != args_len; ++i) {
+      size_t len = 0;
+      const char *name = LLVMGetValueName2(params[i], &len);
+      curr_named_variables[std::string(name, len)]->value =
           new ConstValue(proto->arg_types[i], params[i]);
+    }
     Value *ret_val = body->gen_value()->cast_to(proto->type->return_type);
     // Finish off the function.
     LLVMBuildRet(curr_builder, ret_val->gen_val());

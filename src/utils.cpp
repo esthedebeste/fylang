@@ -64,7 +64,7 @@ const char *next_unnamed() {
 // Unnamed symbol
 #define UN next_unnamed()
 
-_Noreturn void error(const char *str) {
-  fprintf(stderr, "Error: %s\n", str);
-  exit(1);
-}
+#define error(format...) fprintf(stderr, "Error: " format), exit(1)
+#define debug_log(format...)                                                   \
+  if (DEBUG)                                                                   \
+  fprintf(stderr, format)

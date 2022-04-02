@@ -45,8 +45,7 @@ void loop_and_delete(LLVMModuleRef module,
   while (func != NULL) {
     LLVMValueRef nxt = next(func);
     if (!is_global_used(func)) {
-      if (DEBUG)
-        fprintf(stderr, "Removing %s\n", LLVMGetValueName(func));
+      debug_log("Removing %s\n", LLVMGetValueName(func));
       remove(func);
     }
     func = nxt;

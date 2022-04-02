@@ -4,9 +4,7 @@
 #include "ucr.cpp"
 static void handle_definition() {
   auto ast = parse_definition();
-  if (DEBUG)
-    fprintf(stderr, "Parsed a function definition (name: %s).\n",
-            ast->proto->name);
+  debug_log("Parsed a function definition (name: %s).\n", ast->proto->name);
   auto val = ast->gen_toplevel();
   if (DEBUG)
     LLVMDumpValue(val);
@@ -14,36 +12,31 @@ static void handle_definition() {
 
 static void handle_declare() {
   auto ast = parse_declare();
-  if (DEBUG)
-    fprintf(stderr, "Parsed a declare\n");
+  debug_log("Parsed a declare\n");
   auto val = ast->gen_toplevel();
   if (DEBUG)
     LLVMDumpValue(val);
 }
 static void handle_global_let() {
   auto ast = parse_let_expr(true);
-  if (DEBUG)
-    fprintf(stderr, "Parsed a global variable\n");
+  debug_log("Parsed a global variable\n");
   auto val = ast->gen_toplevel();
   if (DEBUG)
     LLVMDumpValue(val);
 }
 static void handle_global_struct() {
   auto ast = parse_struct();
-  if (DEBUG)
-    fprintf(stderr, "Parsed a struct definition\n");
+  debug_log("Parsed a struct definition\n");
   ast->gen_toplevel();
 }
 static void handle_global_type() {
   auto ast = parse_type_definition();
-  if (DEBUG)
-    fprintf(stderr, "Parsed a type definition\n");
+  debug_log("Parsed a type definition\n");
   ast->gen_toplevel();
 }
 static void handle_global_include() {
   char *file_name = parse_include();
-  if (DEBUG)
-    fprintf(stderr, "Parsed an include\n");
+  debug_log("Parsed an include\n");
   CharReader *curr_file = queue[queue_len - 1];
   add_file_to_queue(curr_file->file_path, file_name);
   get_next_token();
@@ -78,10 +71,7 @@ static void main_loop() {
       handle_global_type();
       break;
     default:
-      fprintf(stderr, "Unexpected token '%c' (%d) at top-level", curr_token,
-              curr_token);
-      exit(1);
-      break;
+      error("Unexpected token '%c' (%d) at top-level", curr_token, curr_token);
     }
   }
 }
@@ -105,7 +95,7 @@ int main(int argc, char **argv) {
   LLVMInitializeAllTargetInfos();
   LLVMInitializeAllTargetMCs();
   if (LLVMGetTargetFromTriple(target_triple, &target, &error_message) != 0)
-    error(error_message);
+    error("%s", error_message);
   char *host_cpu_name = LLVMGetHostCPUName();
   char *host_cpu_features = LLVMGetHostCPUFeatures();
   LLVMTargetMachineRef target_machine = LLVMCreateTargetMachine(
@@ -128,8 +118,8 @@ int main(int argc, char **argv) {
   // export LLVM IR into other file
   char *output = LLVMPrintModuleToString(curr_module);
   FILE *output_file = fopen(argv[2], "w");
-  fprintf(output_file, "%s", output);
-  fprintf(stderr, "\nSuccessfully compiled %s to %s\n", argv[1], argv[2]);
+  fputs(output, output_file);
+  printf("\nSuccessfully compiled %s to %s\n", argv[1], argv[2]);
   // dispose of a bunch of stuff
   LLVMDisposeMessage(output);
   LLVMDisposeModule(curr_module);

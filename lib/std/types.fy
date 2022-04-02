@@ -7,7 +7,7 @@ type bool = typeof false
 
 // type shortest = int1
 // type shorter = int8
-// type short = int16
+type short = int16
 // type five_foot_seven = int32
 type long = int64
 type longer = int128

@@ -52,11 +52,11 @@ declare fun srand(seed: unsigned int): void
 // absolute values
 declare fun abs(j: int): int
 /* // TODO: overrides
-    declare fun abs(j: _long_int): _long_int
-    declare fun abs(j: _long_long_int): _long_long_int
-    declare fun abs(j: float): float
-    declare fun abs(j: double): double
-    declare fun abs(j: _long_double): _long_double
+	declare fun abs(j: _long_int): _long_int
+	declare fun abs(j: _long_long_int): _long_long_int
+	declare fun abs(j: float): float
+	declare fun abs(j: double): double
+	declare fun abs(j: _long_double): _long_double
 */ 
 
 declare fun labs(j: _long_int): _long_int

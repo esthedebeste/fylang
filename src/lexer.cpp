@@ -68,8 +68,7 @@ static char get_escape(char escape_char) {
   case '0':
     return '\0';
   default:
-    fprintf(stderr, "Invalid escape '\\%c'", escape_char);
-    return '\0';
+    error("Invalid escape '\\%c'", escape_char);
   }
 }
 
@@ -82,49 +81,35 @@ static int next_token() {
   if (isalpha(last_char) || last_char == '_') {
     read_str(&is_alphaish, &identifier_string, &identifier_string_length);
 #define T_eq(str) streq_lit(identifier_string, identifier_string_length, str)
-    if (T_eq("fun"))
-      return T_FUNCTION;
-    else if (T_eq("declare"))
-      return T_DECLARE;
-    else if (T_eq("if"))
-      return T_IF;
-    else if (T_eq("else"))
-      return T_ELSE;
-    else if (T_eq("let"))
-      return T_LET;
-    else if (T_eq("const"))
-      return T_CONST;
-    else if (T_eq("while"))
-      return T_WHILE;
-    else if (T_eq("struct"))
-      return T_STRUCT;
-    else if (T_eq("new"))
-      return T_NEW;
-    else if (T_eq("include"))
-      return T_INCLUDE;
-    else if (T_eq("type"))
-      return T_TYPE;
-    else if (T_eq("unsigned"))
-      return T_UNSIGNED;
-    else if (T_eq("signed"))
-      return T_SIGNED;
-    else if (T_eq("as"))
-      return T_AS;
+#define token(str, t)                                                          \
+  if (T_eq(str))                                                               \
+  return t
+#define etoken(str, t) else if (T_eq(str)) return t
+    token("fun", T_FUNCTION);
+    etoken("declare", T_DECLARE);
+    etoken("if", T_IF);
+    etoken("else", T_ELSE);
+    etoken("let", T_LET);
+    etoken("const", T_CONST);
+    etoken("while", T_WHILE);
+    etoken("struct", T_STRUCT);
+    etoken("new", T_NEW);
+    etoken("include", T_INCLUDE);
+    etoken("type", T_TYPE);
+    etoken("unsigned", T_UNSIGNED);
+    etoken("signed", T_SIGNED);
+    etoken("as", T_AS);
     // __ because vararg can't be used outside of declarations
-    else if (T_eq("__VARARG__"))
-      return T_VARARG;
-    else if (T_eq("typeof"))
-      return T_TYPEOF;
-    else if (T_eq("true"))
-      return T_TRUE;
-    else if (T_eq("false"))
-      return T_FALSE;
-    else if (T_eq("return"))
-      return T_RETURN;
-    else if (T_eq("for"))
-      return T_FOR;
-    else if (T_eq("DUMP"))
-      return T_DUMP;
+    etoken("__VARARG__", T_VARARG);
+    etoken("typeof", T_TYPEOF);
+    etoken("true", T_TRUE);
+    etoken("false", T_FALSE);
+    etoken("return", T_RETURN);
+    etoken("for", T_FOR);
+    etoken("DUMP", T_DUMP);
+    etoken("sizeof", T_SIZEOF);
+#undef etoken
+#undef token
 #undef T_eq
     return T_IDENTIFIER;
   } else if (isdigit(last_char)) {

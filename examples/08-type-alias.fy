@@ -3,8 +3,8 @@ include "std/io"
 type number = int32
 
 fun main(): number {
-    let a: number = 2 * 4
-    eputs("2 * 4 = ")
-    eputn(a)
-    0
+	let a: number = 2 * 4
+	eputs("2 * 4 = ")
+	eputn(a)
+	0
 }

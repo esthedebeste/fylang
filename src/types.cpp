@@ -33,11 +33,6 @@ public:
     return this->type_type() == other->type_type();
   };
   virtual bool neq(Type *other) { return !eq(other); }
-  void log_diff(Type *other) {
-    fprintf(stderr, "%s does not match %s", this->stringify(),
-            other->stringify());
-  }
-
   virtual const char *stringify() { error("stringify not implemented yet"); }
 };
 
@@ -67,6 +62,11 @@ public:
       bits = parse_pos_int(bits_str, bits_str_len, 10);
     byte_size = bits / 8;
   }
+  // Pointer-size
+  NumType(bool is_signed) : is_floating(false), is_signed(is_signed) {
+    byte_size = LLVMPointerSize(target_data);
+    bits = byte_size * 8;
+  }
   LLVMTypeRef llvm_type() {
     if (!is_floating)
       return LLVMIntType(bits);
@@ -80,8 +80,7 @@ public:
     case 128:
       return LLVMFP128Type();
     default:
-      fprintf(stderr, "TypeError: floating %d-bit numbers don't exist", bits);
-      exit(1);
+      error("floating %d-bit numbers don't exist", bits);
     }
   }
   TypeType type_type() { return TypeType::Number; }
