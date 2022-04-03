@@ -60,14 +60,16 @@ public:
            Value *b_v)
       : a_bb(a_bb), a_v(a_v), b_bb(b_bb), b_v(b_v) {
     type = a_v->get_type(); // TODO
-    gen_val();
     if (a_v->has_ptr() && b_v->has_ptr())
       gen_ptr();
+    gen_val();
   }
   Type *get_type() { return type; }
   LLVMValueRef gen_val() {
     if (load)
       return load;
+    if (ptr)
+      return load = LLVMBuildLoad2(curr_builder, type->llvm_type(), ptr, UN);
     LLVMValueRef incoming_v[2] = {a_v->gen_val(), b_v->gen_val()};
     LLVMBasicBlockRef incoming_bb[2] = {a_bb, b_bb};
     LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), UN);
@@ -79,7 +81,8 @@ public:
       return ptr;
     LLVMValueRef incoming_v[2] = {a_v->gen_ptr(), b_v->gen_ptr()};
     LLVMBasicBlockRef incoming_bb[2] = {a_bb, b_bb};
-    LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), UN);
+    LLVMValueRef phi = LLVMBuildPhi(
+        curr_builder, (new PointerType(get_type()))->llvm_type(), UN);
     LLVMAddIncoming(phi, incoming_v, incoming_bb, 2);
     return ptr = phi;
   }
@@ -106,7 +109,7 @@ LLVMValueRef gen_num_cast(LLVMValueRef value, NumType *a, Type *b) {
     if (a->is_floating)
       return LLVMBuildFPCast(curr_builder, value, num->llvm_type(), UN);
     return LLVMBuildIntCast2(curr_builder, value, num->llvm_type(),
-                             num->is_signed, UN);
+                             a->is_signed, UN);
   } else if (b->type_type() == TypeType::Pointer) {
     if (a->byte_size == LLVMPointerSize(target_data))
       return LLVMBuildBitCast(curr_builder, value, b->llvm_type(), UN);
@@ -147,7 +150,7 @@ LLVMValueRef gen_arr_cast(LLVMValueRef value, ArrayType *a, Type *b) {
 
 LLVMValueRef cast(LLVMValueRef source, Type *src, Type *to) {
   if (src->eq(to))
-    return source;
+    return LLVMBuildBitCast(curr_builder, source, to->llvm_type(), UN);
   if (NumType *num = dynamic_cast<NumType *>(src))
     return gen_num_cast(source, num, to);
   if (PointerType *ptr = dynamic_cast<PointerType *>(src))

@@ -2,6 +2,7 @@ include "types.fy"
 include "c/stdlib"
 
 const PTR_SIZE = sizeof *unknown
+const NULLPTR = 0 as uint_ptrsize as *unknown
 struct Array {
 	ptr: **unknown, // TODO: generics/templates to type this pointer
 	length: uint_ptrsize,
@@ -15,7 +16,7 @@ fun create_array(): *Array
 fun(*Array) push(added: *unknown): uint_ptrsize {
 	if(this.length >= this.allocated) {
 		this.allocated *= 2
-		reallocarray(this.ptr, this.allocated, PTR_SIZE)
+		this.ptr = reallocarray(this.ptr, this.allocated, PTR_SIZE) as **unknown
 	}
 	this.ptr[this.length] = added
 	this.length += 1
@@ -24,11 +25,13 @@ fun(*Array) push(added: *unknown): uint_ptrsize {
 fun(*Array) set(index: uint_ptrsize, to: *unknown): *unknown
 	this.ptr[index] = to
 
-fun(*Array) at(index: int_ptrsize): *unknown
-	if(index < 0) 
-		this.ptr[this.length + index]
+fun(*Array) at(index: int_ptrsize): *unknown {
+	const i: int_ptrsize = if(index < 0) this.length as int_ptrsize + index else index 
+	if(i < 0 || i >= this.length)
+		NULLPTR
 	else
-		this.ptr[index]
+		this.ptr[i]
+}
 
 fun(*Array) map(func: *fun(*unknown, uint_ptrsize): *unknown): *Array {
 	const arr = new Array { ptr = calloc(this.length, PTR_SIZE), length = this.length, allocated = this.length }

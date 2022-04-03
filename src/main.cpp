@@ -114,7 +114,9 @@ int main(int argc, char **argv) {
   add_file_to_queue((char *)".", argv[1]);
   // parse and compile everything into LLVM IR
   main_loop();
-  remove_unused_globals(curr_module, LLVMGetNamedFunction(curr_module, "main"));
+  if (!getenv("NO_UCR"))
+    remove_unused_globals(curr_module,
+                          LLVMGetNamedFunction(curr_module, "main"));
   // export LLVM IR into other file
   char *output = LLVMPrintModuleToString(curr_module);
   FILE *output_file = fopen(argv[2], "w");

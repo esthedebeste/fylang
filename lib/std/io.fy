@@ -1,6 +1,5 @@
 include "c/stdio"
 include "types.fy"
-include "string.fy"
 
 // eputc - takes a char and prints it to stderr
 fun eputc(ch: char)
@@ -18,6 +17,7 @@ fun eputd(x: double)
 fun eputn(i: int)
 	fprintf(stderr, "%d", i)
 
+include "string.fy"
 fun(*String) print_to(stream: *FILE)
 	fwrite(this.chars, 1, this.length, stream)
 

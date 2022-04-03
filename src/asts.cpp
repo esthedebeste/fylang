@@ -22,6 +22,7 @@ struct ValueAndType {
 };
 static std::map<std::string, ValueAndType *> curr_named_variables;
 static std::map<std::string, Type *> curr_named_types;
+static FunctionType *curr_func_type;
 
 NumType *num_char_to_type(char type_char, bool has_dot) {
   switch (type_char) {
@@ -151,12 +152,14 @@ public:
   LLVMValueRef gen_toplevel() {
     LLVMValueRef ptr = LLVMAddGlobal(curr_module, type->llvm_type(), id);
     if (value) {
-      Value *val = value->gen_value();
-      if (ConstValue *expr = dynamic_cast<ConstValue *>(val))
-        LLVMSetInitializer(ptr, val->gen_val());
+      LLVMValueRef val = value->gen_value()->gen_val();
+      if (LLVMIsAConstant(val))
+        LLVMSetInitializer(ptr, val);
       else
         error("Global variable needs a constant value inside it");
     }
+    if (constant)
+      LLVMSetGlobalConstant(ptr, true);
     curr_named_variables[std::string(id, id_len)]->value =
         new BasicLoadValue(ptr, type);
     return ptr;
@@ -471,7 +474,8 @@ public:
     case '&':
       return new ConstValue(type, val->gen_ptr());
     case T_RETURN:
-      LLVMBuildRet(curr_builder, val->gen_val());
+      LLVMBuildRet(curr_builder,
+                   val->cast_to(curr_func_type->return_type)->gen_val());
       return val;
     default:
       error("invalid prefix unary operator '%c'", op);
@@ -674,7 +678,10 @@ public:
           LLVMConstInt(LLVMInt32Type(), indexes[i], false)};
       LLVMValueRef set_ptr = LLVMBuildStructGEP2(
           curr_builder, s_type->llvm_type(), ptr, indexes[i], "tmpgep");
-      LLVMBuildStore(curr_builder, values[i]->gen_value()->gen_val(), set_ptr);
+      LLVMBuildStore(
+          curr_builder,
+          values[i]->gen_value()->cast_to(s_type->get_elem_type(i))->gen_val(),
+          set_ptr);
     }
     return new ConstValue(p_type, ptr);
   }
@@ -934,6 +941,7 @@ public:
   FunctionType *get_type() { return type; }
   LLVMValueRef codegen() {
     LLVMValueRef func = LLVMAddFunction(curr_module, name, type->llvm_type());
+    curr_func_type = type;
     curr_named_variables[std::string(name, name_len)]->value =
         new FuncValue(type, func);
     // Set names for all arguments.

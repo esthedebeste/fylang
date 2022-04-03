@@ -56,19 +56,20 @@ fun(*String) uppercase(): *String
 fun(*String) lowercase(): *String
 	this.transform(&tolower)
 
-
 fun streql(a: *char, b: *char, len: uint_ptrsize): bool {
 	for (let i = 0 as uint_ptrsize; i < len; i += 1)
 		if (a[i] != b[i])
 			return false
 	true
 }
+
 fun(*String) starts_with(prefix: *String): bool
 	if(this.length < prefix.length) false
 	else streql(this.chars, prefix.chars, prefix.length)
 
 fun(*String) ends_with(postfix: *String): bool
-	if(this.length < postfix.length) false
+	if(this.length < postfix.length)
+		false
 	else {
 		const offset = this.length - postfix.length
 		for (let i = postfix.length; i > 0; i -= 1)

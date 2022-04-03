@@ -16,11 +16,11 @@ static const char *tt_to_str(TypeType tt) {
   case Function:
     return "function";
   case Array:
-    return "tuple";
+    return "array";
   case Struct:
     return "struct";
   case Tuple:
-    return "nameless struct";
+    return "tuple";
   }
 };
 /// Base type class.
@@ -169,13 +169,16 @@ public:
   LLVMTypeRef llvm_type() { return llvm_struct_type; }
   TypeType type_type() { return TypeType::Tuple; }
   bool eq(Type *other) {
-    if (TupleType *other_s = dynamic_cast<TupleType *>(other))
-      if (other_s->length == length) {
-        for (size_t i = 0; i < length; i++)
-          if (other_s->types[i]->neq(types[i]))
-            return false;
-        return true;
-      }
+    if (TupleType *other_s = dynamic_cast<TupleType *>(other)) {
+      if (other_s->length == 0)
+        return true; // empty tuple is equal to any other tuple, for `unknown`
+      if (other_s->length != length)
+        return false;
+      for (size_t i = 0; i < length; i++)
+        if (other_s->types[i]->neq(types[i]))
+          return false;
+      return true;
+    }
     return false;
   }
   const char *stringify() {

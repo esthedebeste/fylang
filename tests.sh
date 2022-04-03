@@ -16,12 +16,18 @@ do
   $dir/bin/fylang ${file##$dir/lib/} /dev/null || exit $?
 done
 echo " - All lib files compile"
-for file in $dir/tests/*.fy
+for file in $dir/tests/*.fy $dir/tests/**/*.fy
 do
   file=${file##$dir/tests/}
   file=${file%.fy}
   get_exec "tests/$file"
   out=$($executable 2>&1)
+  if [ "$?" -ne 0 ]
+  then
+    echo " - $file failed"
+    echo "$out"
+    exit 1
+  fi
   expected=$(cat "tests/$file.txt")
   echo $out
   if [ "$out" != "$expected" ]; then

@@ -1,0 +1,14 @@
+arr: 
+ - length: 3
+ - at(-1): 1
+ - at( 0): 2
+ - at( 1): 3
+filtered: 
+ - length: 2
+ -  at(0): 3
+ -  at(1): 1
+doubled: 
+ - length: 3
+ - at(-1): 2
+ - at( 0): 4
+ - at( 1): 6

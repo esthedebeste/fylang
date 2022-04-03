@@ -8,6 +8,10 @@ if [ "$1" = "-Q" ]; then
   export QUIET=1
   shift
 fi
+if [ "$1" = "-U" ]; then 
+  export NO_UCR=1
+  shift
+fi
 name=$1
 bin_name=${name##**/}
 bin_name=${bin_name%.fy}
