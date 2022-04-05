@@ -4,6 +4,10 @@ if [ "$1" = "-F" ]; then shift; else
   echo "
  - Compiled fylang"
 fi
+if [ "$1" = "-D" ]; then 
+  export DEBUG=1
+  shift
+fi
 if [ "$1" = "-Q" ]; then 
   export QUIET=1
   shift

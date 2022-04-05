@@ -36,7 +36,7 @@ static void handle_global_type() {
 }
 static void handle_global_include() {
   char *file_name = parse_include();
-  debug_log("Parsed an include\n");
+  debug_log("Parsed an include (%s)\n", file_name);
   CharReader *curr_file = queue[queue_len - 1];
   add_file_to_queue(curr_file->file_path, file_name);
   get_next_token();

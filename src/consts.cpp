@@ -2,7 +2,6 @@
 #include <ctype.h>
 #include <libgen.h>
 #include <malloc.h>
-#include <map>
 #include <math.h>
 #include <memory>
 #include <stdbool.h>
@@ -10,10 +9,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <string>
+#include <unordered_map>
 extern "C" {
-#include "llvm-c/Core.h"
-#include "llvm-c/TargetMachine.h"
-#include "llvm-c/Transforms/PassBuilder.h"
+#include "llvm-c-15/llvm-c/Core.h"
+#include "llvm-c-15/llvm-c/TargetMachine.h"
 }
 bool DEBUG = false;
 bool QUIET = false;
@@ -66,7 +65,7 @@ static LLVMContextRef curr_ctx;
 static LLVMBuilderRef curr_builder;
 static LLVMModuleRef curr_module;
 static LLVMTargetDataRef target_data;
-static std::map<int, int> binop_precedence = {
+static std::unordered_map<int, int> binop_precedence = {
 #define assign_prec 1
     {'=', 1},       {T_PLUSEQ, 1},    {T_MINEQ, 1}, {T_STAREQ, 1},
     {T_SLASHEQ, 1}, {T_PERCENTEQ, 1}, {T_ANDEQ, 1}, {T_OREQ, 1},
@@ -83,7 +82,7 @@ static std::map<int, int> binop_precedence = {
     {'&', 60},      {'|', 60}};
 
 // += to +, -= to -, etc.
-static std::map<int, int> op_eq_ops = {
+static std::unordered_map<int, int> op_eq_ops = {
     {T_PLUSEQ, '+'},    {T_MINEQ, '-'}, {T_STAREQ, '*'}, {T_SLASHEQ, '/'},
     {T_PERCENTEQ, '%'}, {T_ANDEQ, '&'}, {T_OREQ, '|'},
 };

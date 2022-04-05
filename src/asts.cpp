@@ -15,13 +15,31 @@ public:
   virtual Value *gen_value() = 0;
 };
 
-struct ValueAndType {
+class ValueAndType : public ExprAST {
+public:
   Value *value;
   Type *type;
   ValueAndType(Type *type) : type(type) {}
+  Type *get_type() { return type; };
+  Value *gen_value() { return value; };
 };
-static std::map<std::string, ValueAndType *> curr_named_variables;
-static std::map<std::string, Type *> curr_named_types;
+static std::unordered_map<std::string, ValueAndType *> curr_named_variables;
+static std::unordered_map<std::string, Type *> curr_named_types;
+#define type_string std::pair<Type *, std::string>
+template <> struct std::hash<type_string> {
+  size_t operator()(const type_string type) const {
+    return type.first->hash() ^ std::hash<std::string>()(type.second);
+  }
+};
+template <> struct std::equal_to<type_string> {
+  bool operator()(const type_string &p1, const type_string &p2) const {
+    return p1.first->eq(p2.first) && p1.second == p2.second;
+  }
+};
+
+static std::unordered_map<type_string, ValueAndType *> curr_extension_methods;
+#undef type_string
+
 static FunctionType *curr_func_type;
 
 NumType *num_char_to_type(char type_char, bool has_dot) {
@@ -116,7 +134,10 @@ class VariableExprAST : public ExprAST {
   ValueAndType *vt;
 
 public:
-  VariableExprAST(char *name, size_t name_len) {
+  char *name;
+  size_t name_len;
+  VariableExprAST(char *name, size_t name_len)
+      : name(name), name_len(name_len) {
     vt = curr_named_variables[std::string(name, name_len)];
     if (!vt)
       error("Variable '%s' doesn't exist.", name);
@@ -512,9 +533,10 @@ public:
 
   Type *get_type() { return type; }
   Value *gen_value() {
-    LLVMValueRef func = called->gen_value()->gen_val();
-    if (!func)
+    Value *func_v = called->gen_value();
+    if (!func_v)
       error("Unknown function referenced");
+    LLVMValueRef func = func_v->gen_val();
     LLVMValueRef *arg_vs = alloc_arr<LLVMValueRef>(args_len);
     for (unsigned i = 0; i < args_len; i++) {
       if (i < func_t->arg_count)
@@ -606,21 +628,6 @@ public:
   }
 };
 
-struct CompleteExtensionName {
-  char *str;
-  size_t len;
-};
-CompleteExtensionName get_complete_extension_name(Type *base_type, char *name,
-                                                  size_t name_len) {
-  char *called_type = LLVMPrintTypeToString(base_type->llvm_type());
-  CompleteExtensionName cen;
-  cen.len = 2 + strlen(called_type) + name_len;
-  cen.str = alloc_c(cen.len);
-  strcat(cen.str, called_type);
-  strcat(cen.str, "::");
-  strcat(cen.str, name);
-  return cen;
-}
 /// MethodCallExprAST - Expression class for calling methods (a.len()).
 class MethodCallExprAST : public ExprAST {
   CallExprAST *underlying_call;
@@ -628,14 +635,13 @@ class MethodCallExprAST : public ExprAST {
 public:
   MethodCallExprAST(char *name, size_t name_len, ExprAST *source,
                     ExprAST **args, size_t args_len) {
-    CompleteExtensionName cen =
-        get_complete_extension_name(source->get_type(), name, name_len);
-    if (curr_named_variables.count(std::string(cen.str, cen.len)) != 0) {
-      VariableExprAST *called_function = new VariableExprAST(cen.str, cen.len);
+    ValueAndType *extension = curr_extension_methods[{
+        source->get_type(), std::string(name, name_len)}];
+    if (extension) {
       ExprAST **args_with_this = realloc_arr<ExprAST *>(args, args_len + 1);
       args_with_this[args_len] = source;
       underlying_call =
-          new CallExprAST(called_function, args_with_this, args_len + 1);
+          new CallExprAST(extension, args_with_this, args_len + 1);
     } else {
       // call stored pointer to function
       auto prop = new PropAccessExprAST(name, name_len, source);
@@ -910,6 +916,7 @@ public:
   unsigned int arg_count;
   char *name;
   size_t name_len;
+  ValueAndType *vt;
   PrototypeAST(char *name, size_t name_len, const char **arg_names,
                size_t *arg_name_lengths, Type **arg_types,
                unsigned int arg_count, Type *return_type, bool vararg)
@@ -919,15 +926,21 @@ public:
     for (unsigned i = 0; i != arg_count; ++i)
       curr_named_variables[std::string(arg_names[i], arg_name_lengths[i])] =
           new ValueAndType(arg_types[i]);
-    curr_named_variables[std::string(name, name_len)] = new ValueAndType(
-        type = new FunctionType(return_type, arg_types, arg_count, vararg));
+    type = new FunctionType(return_type, arg_types, arg_count, vararg);
+    vt = new ValueAndType(type);
+    curr_named_variables[std::string(name, name_len)] = vt;
   }
   PrototypeAST(Type *this_type, char *name, size_t name_len,
                const char **arg_names, size_t *arg_name_lengths,
                Type **arg_types, unsigned int arg_count, Type *return_type,
                bool vararg) {
-    CompleteExtensionName cen =
-        get_complete_extension_name(this_type, name, name_len);
+    char *called_type = LLVMPrintTypeToString(this_type->llvm_type());
+    size_t cn_len = strlen(called_type) + 1 + name_len;
+    char *compiled_name = alloc_c(cn_len);
+    strcat(compiled_name, called_type);
+    strcat(compiled_name, ":");
+    strcat(compiled_name, name);
+    LLVMDisposeMessage(called_type);
     arg_count++;
     arg_names = realloc_arr<const char *>(arg_names, arg_count);
     arg_names[arg_count - 1] = strdup("this");
@@ -935,15 +948,22 @@ public:
     arg_name_lengths[arg_count - 1] = 4;
     arg_types = realloc_arr<Type *>(arg_types, arg_count);
     arg_types[arg_count - 1] = this_type;
-    new (this) PrototypeAST(cen.str, cen.len, arg_names, arg_name_lengths,
-                            arg_types, arg_count, return_type, vararg);
+    this->name = compiled_name, this->name_len = cn_len,
+    this->arg_names = arg_names, this->arg_name_lengths = arg_name_lengths,
+    this->arg_types = arg_types, this->arg_count = arg_count;
+    for (unsigned i = 0; i != arg_count; ++i)
+      curr_named_variables[std::string(arg_names[i], arg_name_lengths[i])] =
+          new ValueAndType(arg_types[i]);
+    vt = new ValueAndType(
+        type = new FunctionType(return_type, arg_types, arg_count, vararg));
+    curr_extension_methods[{this_type, std::string(name, name_len)}] = vt;
   }
   FunctionType *get_type() { return type; }
   LLVMValueRef codegen() {
     LLVMValueRef func = LLVMAddFunction(curr_module, name, type->llvm_type());
     curr_func_type = type;
-    curr_named_variables[std::string(name, name_len)]->value =
-        new FuncValue(type, func);
+    vt->value = new FuncValue(type, func);
+    curr_named_variables[std::string(name, name_len)] = vt;
     // Set names for all arguments.
     LLVMValueRef *params = alloc_arr<LLVMValueRef>(arg_count);
     LLVMGetParams(func, params);

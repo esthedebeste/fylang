@@ -65,6 +65,8 @@ const char *next_unnamed() {
 #define UN next_unnamed()
 
 #define error(format...) fprintf(stderr, "Error: " format), exit(1)
+#define STRINGIFY2(x) #x
+#define STRINGIFY(x) STRINGIFY2(x)
 #define debug_log(format...)                                                   \
   if (DEBUG)                                                                   \
-  fprintf(stderr, format)
+  fprintf(stderr, "[" __FILE__ ":" STRINGIFY(__LINE__) "] " format)

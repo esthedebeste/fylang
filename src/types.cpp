@@ -4,7 +4,7 @@
 static LLVMTypeRef void_type =
     LLVMStructCreateNamed(LLVMGetGlobalContext(), "void");
 
-enum TypeType { Void, Number, Pointer, Function, Array, Struct, Tuple };
+enum TypeType : int { Void, Number, Pointer, Function, Array, Struct, Tuple };
 static const char *tt_to_str(TypeType tt) {
   switch (tt) {
   case Void:
@@ -34,6 +34,12 @@ public:
   };
   virtual bool neq(Type *other) { return !eq(other); }
   virtual const char *stringify() { error("stringify not implemented yet"); }
+  bool operator==(Type *other) { return eq(other); }
+  bool operator!=(Type *other) { return neq(other); }
+  virtual size_t hash() = 0;
+};
+template <> struct std::hash<Type *> {
+  std::size_t operator()(Type *const &s) const noexcept { return s->hash(); }
 };
 
 class VoidType : public Type {
@@ -42,6 +48,7 @@ public:
   LLVMTypeRef llvm_type() { return void_type; }
   TypeType type_type() { return TypeType::Void; }
   const char *stringify() { return "void"; }
+  size_t hash() { return std::hash<int>()(TypeType::Void); }
 };
 
 class NumType : public Type {
@@ -97,6 +104,13 @@ public:
     strcat(str, num_to_str(bits));
     return str;
   }
+  size_t hash() {
+    size_t h = 0;
+    h ^= std::hash<unsigned int>()(bits);
+    h ^= std::hash<bool>()(is_floating);
+    h ^= std::hash<bool>()(is_signed);
+    return h ^ std::hash<int>()(TypeType::Number);
+  }
 };
 class PointerType : public Type {
 public:
@@ -121,6 +135,9 @@ public:
     str[0] = '*';
     strcat(str + 1, contains);
     return str;
+  }
+  size_t hash() {
+    return points_to->hash() ^ std::hash<int>()(TypeType::Pointer);
   }
 };
 class ArrayType : public Type {
@@ -148,6 +165,10 @@ public:
     strcat(str, num_to_str(count));
     strcat(str, " )");
     return str;
+  }
+  size_t hash() {
+    return elem->hash() ^ std::hash<unsigned int>()(count) ^
+           std::hash<int>()(TypeType::Array);
   }
 };
 class TupleType : public Type {
@@ -199,6 +220,12 @@ public:
     strncat(buf, " }", 2);
     return buf;
   }
+  size_t hash() {
+    size_t h = 0;
+    for (size_t i = 0; i < length; i++)
+      h ^= types[i]->hash();
+    return h ^ std::hash<size_t>()(length) ^ std::hash<int>()(TypeType::Tuple);
+  }
 };
 class StructType : public TupleType {
 public:
@@ -236,6 +263,12 @@ public:
     return false;
   }
   const char *stringify() { return name; }
+  size_t hash() {
+    size_t h = 0;
+    for (size_t i = 0; i < length; i++)
+      h ^= types[i]->hash();
+    return h ^ std::hash<size_t>()(length) ^ std::hash<int>()(TypeType::Struct);
+  }
 };
 class FunctionType : public Type {
 public:
@@ -292,5 +325,12 @@ public:
     strcat(str, "): ");
     strcat(str, ret_str);
     return str;
+  }
+  size_t hash() {
+    size_t h = 0;
+    for (unsigned int i = 0; i < arg_count; i++)
+      h ^= arguments[i]->hash();
+    return h ^ std::hash<size_t>()(arg_count) ^
+           std::hash<int>()(TypeType::Function);
   }
 };

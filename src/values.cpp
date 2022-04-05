@@ -60,18 +60,24 @@ public:
            Value *b_v)
       : a_bb(a_bb), a_v(a_v), b_bb(b_bb), b_v(b_v) {
     type = a_v->get_type(); // TODO
-    if (a_v->has_ptr() && b_v->has_ptr())
-      gen_ptr();
     gen_val();
+    if (has_ptr())
+      gen_ptr();
   }
   Type *get_type() { return type; }
   LLVMValueRef gen_val() {
     if (load)
       return load;
-    if (ptr)
-      return load = LLVMBuildLoad2(curr_builder, type->llvm_type(), ptr, UN);
-    LLVMValueRef incoming_v[2] = {a_v->gen_val(), b_v->gen_val()};
+    LLVMBasicBlockRef curr = LLVMGetInsertBlock(curr_builder);
+    LLVMPositionBuilderBefore(
+        curr_builder, LLVMGetLastInstruction(a_bb)); // before the terminator
+    LLVMValueRef a = a_v->gen_val();
+    LLVMPositionBuilderBefore(
+        curr_builder, LLVMGetLastInstruction(b_bb)); // before the terminator
+    LLVMValueRef b = b_v->gen_val();
+    LLVMValueRef incoming_v[2] = {a, b};
     LLVMBasicBlockRef incoming_bb[2] = {a_bb, b_bb};
+    LLVMPositionBuilderAtEnd(curr_builder, curr);
     LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), UN);
     LLVMAddIncoming(phi, incoming_v, incoming_bb, 2);
     return load = phi;
@@ -79,14 +85,22 @@ public:
   LLVMValueRef gen_ptr() {
     if (ptr)
       return ptr;
-    LLVMValueRef incoming_v[2] = {a_v->gen_ptr(), b_v->gen_ptr()};
+    LLVMBasicBlockRef curr = LLVMGetInsertBlock(curr_builder);
+    LLVMPositionBuilderBefore(
+        curr_builder, LLVMGetLastInstruction(a_bb)); // before the terminator
+    LLVMValueRef a = a_v->gen_ptr();
+    LLVMPositionBuilderBefore(
+        curr_builder, LLVMGetLastInstruction(b_bb)); // before the terminator
+    LLVMValueRef b = b_v->gen_ptr();
+    LLVMValueRef incoming_v[2] = {a, b};
     LLVMBasicBlockRef incoming_bb[2] = {a_bb, b_bb};
+    LLVMPositionBuilderAtEnd(curr_builder, curr);
     LLVMValueRef phi = LLVMBuildPhi(
         curr_builder, (new PointerType(get_type()))->llvm_type(), UN);
     LLVMAddIncoming(phi, incoming_v, incoming_bb, 2);
     return ptr = phi;
   }
-  bool has_ptr() { return ptr != nullptr; }
+  bool has_ptr() { return a_v->has_ptr() && b_v->has_ptr(); }
 };
 
 LLVMValueRef gen_num_cast(LLVMValueRef value, NumType *a, Type *b) {
@@ -169,11 +183,8 @@ public:
   LLVMValueRef gen_val() {
     return cast(source->gen_val(), source->get_type(), to);
   }
-  LLVMValueRef gen_ptr() {
-    return cast(source->gen_ptr(), new PointerType(source->get_type()),
-                new PointerType(source->get_type()));
-  }
-  bool has_ptr() { return source->has_ptr(); }
+  LLVMValueRef gen_ptr() { error("Can't get the pointer to a cast"); }
+  bool has_ptr() { return false; }
 };
 CastValue *Value::cast_to(Type *to) { return new CastValue(this, to); }
 
