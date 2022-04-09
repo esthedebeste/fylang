@@ -1,12 +1,7 @@
 #pragma once
-#include "types.cpp"
-#include "utils.cpp"
-#include "values.cpp"
-
-class TopLevelAST {
-public:
-  virtual LLVMValueRef gen_toplevel() = 0;
-};
+#include "../types.cpp"
+#include "../utils.cpp"
+#include "../values.cpp"
 /// ExprAST - Base class for all expression nodes.
 class ExprAST {
 public:
@@ -23,12 +18,12 @@ public:
   Type *get_type() { return type; };
   Value *gen_value() { return value; };
 };
+
 static std::unordered_map<std::string, ValueAndType *> curr_named_variables;
-static std::unordered_map<std::string, Type *> curr_named_types;
 #define type_string std::pair<Type *, std::string>
-template <> struct std::hash<type_string> {
-  size_t operator()(const type_string type) const {
-    return type.first->hash() ^ std::hash<std::string>()(type.second);
+template <typename A, typename B> struct std::hash<std::pair<A, B>> {
+  size_t operator()(const std::pair<A, B> type) const {
+    return std::hash<A>()(type.first) ^ std::hash<B>()(type.second);
   }
 };
 template <> struct std::equal_to<type_string> {
@@ -39,8 +34,10 @@ template <> struct std::equal_to<type_string> {
 
 static std::unordered_map<type_string, ValueAndType *> curr_extension_methods;
 #undef type_string
-
 static FunctionType *curr_func_type;
+
+#include "functions.cpp"
+#include "types.cpp"
 
 NumType *num_char_to_type(char type_char, bool has_dot) {
   switch (type_char) {
@@ -65,26 +62,24 @@ NumType *num_char_to_type(char type_char, bool has_dot) {
       error("'b' (byte, uint8) type can't have a '.'");
     return new NumType(8, false, false);
   default:
-    error("Invalid number type id '%c'", type_char);
+    error("Invalid number type id '" + std::string(1, type_char) + "'");
   }
 }
 /// NumberExprAST - Expression class for numeric literals like "1.0".
 class NumberExprAST : public ExprAST {
-  const char *val;
-  size_t val_len;
+  std::string val;
   unsigned int base;
   NumType *type;
 
 public:
-  NumberExprAST(char *val, size_t val_len, char type_char, bool has_dot,
+  NumberExprAST(std::string val, char type_char, bool has_dot,
                 unsigned int base)
-      : val(val), val_len(val_len), base(base) {
+      : val(val), base(base) {
     type = num_char_to_type(type_char, has_dot);
   }
   NumberExprAST(unsigned int val, char type_char) : base(10) {
     type = num_char_to_type(type_char, false);
-    this->val = num_to_str(val);
-    this->val_len = log10(val) + 1;
+    this->val = std::to_string(val);
   }
   Type *get_type() { return type; }
   Value *gen_value() {
@@ -94,39 +89,40 @@ public:
         error("floating-point numbers with a base that isn't decimal aren't "
               "supported.");
       } else
-        num = LLVMConstRealOfStringAndSize(type->llvm_type(), val, val_len);
+        num = LLVMConstRealOfStringAndSize(type->llvm_type(), val.c_str(),
+                                           val.size());
     else
-      num = LLVMConstIntOfStringAndSize(type->llvm_type(), val, val_len, base);
+      num = LLVMConstIntOfStringAndSize(type->llvm_type(), val.c_str(),
+                                        val.size(), base);
     return new ConstValue(type, num);
   }
 };
+Type *bool_type;
 /// BoolExprAST - Expression class for boolean literals (true or false).
 class BoolExprAST : public ExprAST {
   bool value;
-  Type *type;
 
 public:
   BoolExprAST(bool value) : value(value) {
-    type = new NumType(1, false, false);
+    if (!bool_type)
+      bool_type = new NumType(1, false, false);
   }
-  Type *get_type() { return type; }
+  Type *get_type() { return bool_type; }
   Value *gen_value() {
-    return new ConstValue(type, value ? LLVMConstAllOnes(type->llvm_type())
-                                      : LLVMConstNull(type->llvm_type()));
+    return new ConstValue(bool_type,
+                          value ? LLVMConstAllOnes(bool_type->llvm_type())
+                                : LLVMConstNull(bool_type->llvm_type()));
   }
 };
 
 class CastExprAST : public ExprAST {
-  ExprAST *value;
-  Type *from;
-  Type *to;
 
 public:
-  CastExprAST(ExprAST *value, Type *to) : value(value), to(to) {
-    from = value->get_type();
-  }
-  Value *gen_value() { return value->gen_value()->cast_to(to); }
-  Type *get_type() { return to; }
+  ExprAST *value;
+  TypeAST *to;
+  CastExprAST(ExprAST *value, TypeAST *to) : value(value), to(to) {}
+  Type *get_type() { return to->type(); }
+  Value *gen_value() { return value->gen_value()->cast_to(to->type()); }
 };
 
 /// VariableExprAST - Expression class for referencing a variable, like "a".
@@ -134,44 +130,49 @@ class VariableExprAST : public ExprAST {
   ValueAndType *vt;
 
 public:
-  char *name;
-  size_t name_len;
-  VariableExprAST(char *name, size_t name_len)
-      : name(name), name_len(name_len) {
-    vt = curr_named_variables[std::string(name, name_len)];
+  std::string name;
+  VariableExprAST(std::string name) : name(name) {}
+  ValueAndType *get_vt() {
+    vt = curr_named_variables[name];
     if (!vt)
-      error("Variable '%s' doesn't exist.", name);
+      error("Variable '" + name + "' doesn't exist.");
+    return vt;
   }
-  Type *get_type() { return vt->type; }
-  Value *gen_value() { return vt->value; }
+  Type *get_type() { return get_vt()->type; }
+  Value *gen_value() { return get_vt()->value; }
 };
 
 /// LetExprAST - Expression class for creating a variable, like "let a = 3".
 class LetExprAST : public ExprAST, public TopLevelAST {
+  bool defined = false;
+  void init() {
+    if (defined)
+      return;
+    if (type) {
+      curr_named_variables[id] = new ValueAndType(type->type());
+    } else if (value != nullptr) {
+      type = type_ast(value->get_type());
+      curr_named_variables[id] = new ValueAndType(type->type());
+    } else
+      error("Untyped valueless variable " + id);
+    defined = true;
+  }
 
 public:
-  char *id;
-  size_t id_len;
-  Type *type;
+  std::string id;
+  TypeAST *type;
   ExprAST *value;
   bool constant;
-  bool global;
-  LetExprAST(char *id, size_t id_len, Type *type, ExprAST *value, bool constant,
-             bool global)
-      : id(id), id_len(id_len), constant(constant), global(global) {
-    if (type)
-      curr_named_variables[std::string(id, id_len)] = new ValueAndType(type);
-    else if (value != nullptr)
-      curr_named_variables[std::string(id, id_len)] =
-          new ValueAndType(type = value->get_type());
-    else
-      error("Untyped valueless variable");
-    this->type = type;
-    this->value = value;
+  LetExprAST(std::string id, TypeAST *type, ExprAST *value, bool constant)
+      : id(id), type(type), value(value), constant(constant) {}
+  Type *get_type() {
+    init();
+    return type->type();
   }
-  Type *get_type() { return type; }
   LLVMValueRef gen_toplevel() {
-    LLVMValueRef ptr = LLVMAddGlobal(curr_module, type->llvm_type(), id);
+    init();
+    LLVMValueRef ptr =
+        LLVMAddGlobal(curr_module, type->llvm_type(), id.c_str());
     if (value) {
       LLVMValueRef val = value->gen_value()->gen_val();
       if (LLVMIsAConstant(val))
@@ -181,31 +182,34 @@ public:
     }
     if (constant)
       LLVMSetGlobalConstant(ptr, true);
-    curr_named_variables[std::string(id, id_len)]->value =
-        new BasicLoadValue(ptr, type);
+    curr_named_variables[id]->value = new BasicLoadValue(ptr, type->type());
     return ptr;
   }
   Value *gen_value() {
+    init();
     if (constant) {
       if (value)
-        return curr_named_variables[std::string(id, id_len)]->value =
-                   new NamedValue(value->gen_value(), id, id_len);
+        return curr_named_variables[id]->value =
+                   new NamedValue(value->gen_value(), id);
       else
         error("Constant variables need an initialization value");
     }
-    LLVMValueRef ptr = LLVMBuildAlloca(curr_builder, type->llvm_type(), id);
-    LLVMSetValueName2(ptr, id, id_len);
+    LLVMValueRef ptr =
+        LLVMBuildAlloca(curr_builder, type->llvm_type(), id.c_str());
+    LLVMSetValueName2(ptr, id.c_str(), id.size());
     if (value) {
-      LLVMValueRef llvm_val = value->gen_value()->cast_to(type)->gen_val();
+      LLVMValueRef llvm_val =
+          value->gen_value()->cast_to(type->type())->gen_val();
       LLVMBuildStore(curr_builder, llvm_val, ptr);
     }
-    return curr_named_variables[std::string(id, id_len)]->value =
-               new BasicLoadValue(ptr, type);
+    return curr_named_variables[id]->value =
+               new BasicLoadValue(ptr, type->type());
   }
   LLVMValueRef gen_declare() {
-    LLVMValueRef global = LLVMAddGlobal(curr_module, type->llvm_type(), id);
-    curr_named_variables[std::string(id, id_len)]->value =
-        new BasicLoadValue(global, type);
+    init();
+    LLVMValueRef global =
+        LLVMAddGlobal(curr_module, type->llvm_type(), id.c_str());
+    curr_named_variables[id]->value = new BasicLoadValue(global, type->type());
     return global;
   }
 };
@@ -213,10 +217,10 @@ public:
 NumType *sizeof_type;
 /// SizeofExprAST - Expression class to get the byte size of a type
 class SizeofExprAST : public ExprAST {
-  Type *type;
 
 public:
-  SizeofExprAST(Type *type) : type(type) {
+  TypeAST *type;
+  SizeofExprAST(TypeAST *type) : type(type) {
     if (!sizeof_type)
       sizeof_type = new NumType(false); // uint_ptrsize
   }
@@ -243,36 +247,33 @@ public:
   }
 };
 
+PointerType *string_type;
 /// StringExprAST - Expression class for multiple chars ("hello")
 class StringExprAST : public ExprAST {
-  char *chars;
-  size_t length;
+  std::string str;
   ArrayType *t_type;
-  PointerType *p_type;
 
 public:
-  StringExprAST(char *chars, size_t length) : chars(chars), length(length) {
-    if (chars[length - 1] != '\0')
-      error("C-style strings should be fed into StringExprAST including the "
-            "last null-byte");
+  StringExprAST(std::string str) : str(str) {
     if (!char_type)
       char_type = new NumType(8, false, false);
-    t_type = new ArrayType(char_type, length);
-    p_type = new PointerType(char_type);
+    if (!string_type)
+      string_type = char_type->ptr();
+    t_type = new ArrayType(char_type, str.size() + 1 /* zero-byte */);
   }
-  Type *get_type() { return p_type; }
+  Type *get_type() { return string_type; }
   Value *gen_value() {
-    LLVMValueRef str = LLVMConstString(chars, length, true);
+    LLVMValueRef data = LLVMConstString(str.c_str(), str.size(), false);
     LLVMValueRef glob = LLVMAddGlobal(curr_module, t_type->llvm_type(), ".str");
-    LLVMSetInitializer(glob, str);
-    LLVMSetLinkage(glob, LLVMPrivateLinkage);
+    LLVMSetInitializer(glob, data);
+    LLVMSetLinkage(glob, LLVMInternalLinkage);
     LLVMSetUnnamedAddress(glob, LLVMGlobalUnnamedAddr);
     LLVMValueRef zeros[2] = {
-        LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false),
-        LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false)};
+        LLVMConstInt(NumType(false).llvm_type(), 0, false),
+        LLVMConstInt(NumType(false).llvm_type(), 0, false)};
     // cast [ ... x i8 ]* to i8*
     LLVMValueRef cast = LLVMConstGEP2(t_type->llvm_type(), glob, zeros, 2);
-    return new ConstValue(p_type, cast);
+    return new ConstValue(string_type, cast);
   }
 };
 
@@ -314,7 +315,8 @@ LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
     case T_NEQ:
       return LLVMBuildFCmp(curr_builder, LLVMRealUNE, L, R, UN);
     default:
-      error("Error: invalid float_float binary operator '%c'", op);
+      error("Error: invalid float_float binary operator '" + token_to_str(op) +
+            "'");
     }
   else if (!lhs_nt->is_floating && !rhs_nt->is_floating) {
     bool is_signed = lhs_nt->is_signed && rhs_nt->is_signed;
@@ -354,10 +356,10 @@ LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
     case T_NEQ:
       return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntNE, L, R, UN);
     default:
-      error("invalid int_int binary operator '%c'", op);
+      error("invalid int_int binary operator '" + token_to_str(op) + "'");
     }
   } else
-    error("invalid float_int binary operator '%c'", op);
+    error("invalid float_int binary operator '" + token_to_str(op) + "'");
 }
 LLVMValueRef gen_ptr_num_binop(int op, LLVMValueRef ptr, LLVMValueRef num,
                                PointerType *ptr_t, NumType *num_t) {
@@ -373,7 +375,7 @@ LLVMValueRef gen_ptr_num_binop(int op, LLVMValueRef ptr, LLVMValueRef num,
     return LLVMBuildGEP2(curr_builder, ptr_t->points_to->llvm_type(), ptr, &num,
                          1, "ptraddtmp");
   default:
-    error("invalid ptr_num binary operator '%c'", op);
+    error("invalid ptr_num binary operator '" + token_to_str(op) + "'");
   }
 }
 
@@ -381,60 +383,59 @@ LLVMValueRef gen_ptr_num_binop(int op, LLVMValueRef ptr, LLVMValueRef num,
 class BinaryExprAST : public ExprAST {
   int op;
   ExprAST *LHS, *RHS;
-  Type *type;
 
 public:
   BinaryExprAST(int op, ExprAST *LHS, ExprAST *RHS) {
     if (op_eq_ops.count(op)) {
       // if the op is an assignment operator (like +=, -=, *=), then transform
-      // this binaryexpr into an assignment, and the RHS into the operator part.
-      // (basically transforms a+=1 into a=a+1)
+      // this binaryexpr into an assignment, and the RHS into the operator
+      // part. (basically transforms a+=1 into a=a+1)
       RHS = new BinaryExprAST(op_eq_ops[op], LHS, RHS);
       op = '=';
     }
     this->op = op;
     this->LHS = LHS;
     this->RHS = RHS;
+  }
+
+  Type *get_type() {
     Type *lhs_t = LHS->get_type();
     Type *rhs_t = RHS->get_type();
     TypeType lhs_tt = lhs_t->type_type();
     TypeType rhs_tt = rhs_t->type_type();
 
     if (op == '=')
-      type = rhs_t;
+      return rhs_t;
     else if (lhs_tt == TypeType::Number && rhs_tt == TypeType::Number)
-      type =
-          (binop_precedence[op] == comparison_prec /* binop is a comparison */)
-              ? new NumType(1, false, false) // int < int returns uint1 (bool)
-              : /* todo get max size and return that type */ lhs_t; // int + int
-                                                                    // returns
-                                                                    // int
+      return (binop_precedence[op] ==
+              comparison_prec /* binop is a comparison */)
+                 ? new NumType(1, false, false) // int < int returns bool
+                 : lhs_t;                       // int + int returns int
     else if (lhs_tt == TypeType::Pointer &&
              rhs_tt == TypeType::Number) // ptr + int returns offsetted ptr
-      type = /* ptr */ lhs_t;
+      return /* ptr */ lhs_t;
     else if (lhs_tt == TypeType::Number &&
              rhs_tt == TypeType::Pointer) // int + ptr returns offsetted ptr
-      type = /* ptr */ rhs_t;
+      return /* ptr */ rhs_t;
     else
       error("Unknown ptr_ptr op");
   }
 
-  Type *get_type() { return type; }
-
   Value *gen_assign() {
     LLVMValueRef store_ptr = LHS->gen_value()->gen_ptr();
-    Value *val = RHS->gen_value()->cast_to(LHS->get_type());
+    CastValue *val = RHS->gen_value()->cast_to(LHS->get_type());
     LLVMBuildStore(curr_builder, val->gen_val(), store_ptr);
-    return new BasicLoadValue(store_ptr, type);
+    return new BasicLoadValue(store_ptr, get_type());
   }
   Value *gen_value() {
-    Type *lhs_t = LHS->get_type();
-    PointerType *lhs_pt = dynamic_cast<PointerType *>(lhs_t);
     if (op == '=')
       return gen_assign();
+    Type *type = get_type();
+    Type *lhs_t = LHS->get_type();
     Type *rhs_t = RHS->get_type();
     NumType *lhs_nt = dynamic_cast<NumType *>(lhs_t);
     NumType *rhs_nt = dynamic_cast<NumType *>(rhs_t);
+    PointerType *lhs_pt = dynamic_cast<PointerType *>(lhs_t);
     PointerType *rhs_pt = dynamic_cast<PointerType *>(rhs_t);
     LLVMValueRef L = LHS->gen_value()->gen_val();
     LLVMValueRef R = RHS->gen_value()->gen_val();
@@ -461,7 +462,7 @@ public:
       else
         error("* can't be used on a non-pointer type");
     else if (op == '&')
-      type = new PointerType(operand->get_type());
+      type = operand->get_type()->ptr();
     else
       type = operand->get_type();
   }
@@ -499,47 +500,50 @@ public:
                    val->cast_to(curr_func_type->return_type)->gen_val());
       return val;
     default:
-      error("invalid prefix unary operator '%c'", op);
+      error("invalid prefix unary operator '" + token_to_str(op) + "'");
     }
   }
 };
 
 /// CallExprAST - Expression class for function calls.
 class CallExprAST : public ExprAST {
-  FunctionType *func_t;
   ExprAST *called;
-  ExprAST **args;
-  size_t args_len;
+  std::vector<ExprAST *> args;
   bool is_ptr;
-  Type *type;
-
-public:
-  CallExprAST(ExprAST *called, ExprAST **args, size_t args_len)
-      : called(called), args(args), args_len(args_len) {
-    func_t = dynamic_cast<FunctionType *>(called->get_type());
+  FunctionType *get_func_type() {
+    FunctionType *func_t = dynamic_cast<FunctionType *>(called->get_type());
     if (!func_t) {
       if (PointerType *ptr = dynamic_cast<PointerType *>(called->get_type()))
         func_t = dynamic_cast<FunctionType *>(ptr->get_points_to());
       else
         error("Function doesn't exist or is not a function");
     }
-    if (func_t->vararg ? args_len < func_t->arg_count
-                       : args_len != func_t->arg_count)
-      error("Error: Incorrect # arguments passed. (Expected %d, got %d)",
-            func_t->arg_count, (unsigned int)args_len);
-
-    type = func_t->return_type;
+    return func_t;
   }
 
-  Type *get_type() { return type; }
+public:
+  CallExprAST(ExprAST *called, std::vector<ExprAST *> args)
+      : called(called), args(args) {}
+
+  Type *get_type() {
+    FunctionType *func_t = get_func_type();
+    if (func_t->vararg ? args.size() < func_t->arguments.size()
+                       : args.size() != func_t->arguments.size())
+      error("Incorrect # arguments passed. (Expected " +
+            std::to_string(func_t->arguments.size()) + ", got " +
+            std::to_string(args.size()) + ")");
+
+    return func_t->return_type;
+  }
   Value *gen_value() {
+    FunctionType *func_t = get_func_type();
     Value *func_v = called->gen_value();
     if (!func_v)
       error("Unknown function referenced");
     LLVMValueRef func = func_v->gen_val();
-    LLVMValueRef *arg_vs = alloc_arr<LLVMValueRef>(args_len);
-    for (unsigned i = 0; i < args_len; i++) {
-      if (i < func_t->arg_count)
+    LLVMValueRef *arg_vs = new LLVMValueRef[args.size()];
+    for (size_t i = 0; i < args.size(); i++) {
+      if (i < func_t->arguments.size())
         arg_vs[i] =
             args[i]->gen_value()->cast_to(func_t->arguments[i])->gen_val();
       else
@@ -547,7 +551,7 @@ public:
     }
     return new ConstValue(func_t->return_type,
                           LLVMBuildCall2(curr_builder, func_t->llvm_type(),
-                                         func, arg_vs, args_len, UN));
+                                         func, arg_vs, args.size(), UN));
   }
 };
 
@@ -555,24 +559,23 @@ public:
 class IndexExprAST : public ExprAST {
   ExprAST *value;
   ExprAST *index;
-  Type *type;
 
 public:
-  IndexExprAST(ExprAST *value, ExprAST *index) : value(value), index(index) {
+  IndexExprAST(ExprAST *value, ExprAST *index) : value(value), index(index) {}
+  Type *get_type() {
     Type *base_type = value->get_type();
     if (PointerType *p_type = dynamic_cast<PointerType *>(base_type))
-      type = p_type->get_points_to();
+      return p_type->get_points_to();
     else if (ArrayType *arr_type = dynamic_cast<ArrayType *>(base_type))
-      type = arr_type->get_elem_type();
+      return arr_type->get_elem_type();
     else
       error("Invalid index, type not arrayish.\n"
-            "Expected: array | pointer \nGot: %s",
+            "Expected: array | pointer \nGot: " +
             tt_to_str(base_type->type_type()));
   }
 
-  Type *get_type() { return type; }
-
   Value *gen_value() {
+    Type *type = get_type();
     LLVMValueRef index_v = index->gen_value()->gen_val();
     return new BasicLoadValue(LLVMBuildGEP2(curr_builder, type->llvm_type(),
                                             value->gen_value()->gen_val(),
@@ -581,30 +584,20 @@ public:
   }
 };
 
-/// PropAccessExprAST - Expression class for accessing properties (a.size).
-class PropAccessExprAST : public ExprAST {
-  ExprAST *source;
+/// NumAccessExprAST - Expression class for accessing indexes on Tuples (a.0).
+class NumAccessExprAST : public ExprAST {
   bool is_ptr;
   TupleType *source_type;
-  unsigned int index;
-  char *key;
-  Type *type;
+  Type *type = nullptr;
 
 public:
-  PropAccessExprAST(char *key, size_t name_len, ExprAST *source)
-      : key(key), source(source) {
-    Type *st = source->get_type();
-    if (st->type_type() == TypeType::Pointer) {
-      st = dynamic_cast<PointerType *>(source->get_type())->get_points_to();
-      is_ptr = true;
-    }
-    StructType *struct_t = dynamic_cast<StructType *>(st);
-    index = struct_t->get_index(key, name_len);
-    type = struct_t->get_elem_type(index);
-    source_type = struct_t;
-  }
-  PropAccessExprAST(unsigned int idx, ExprAST *source)
-      : index(idx), source(source) {
+  unsigned int index;
+  ExprAST *source;
+  NumAccessExprAST(unsigned int index, ExprAST *source)
+      : index(index), source(source) {}
+  void init() {
+    if (type)
+      return; // already initialized
     Type *st = source->get_type();
     if (st->type_type() == TypeType::Pointer) {
       st = dynamic_cast<PointerType *>(source->get_type())->get_points_to();
@@ -614,12 +607,65 @@ public:
     type = source_type->get_elem_type(index);
   }
 
-  Type *get_type() { return type; }
+  Type *get_type() {
+    init();
+    return type;
+  }
 
   Value *gen_value() {
+    init();
     Value *src = source->gen_value();
-    // If src is a struct-pointer (*String) then access on the value, if src is
-    // a struct-value (String) then access on the pointer to where it's stored.
+    // If src is a struct-pointer (*String) then access on the value, if src
+    // is a struct-value (String) then access on the pointer to where it's
+    // stored.
+    LLVMValueRef struct_ptr = is_ptr ? src->gen_val() : src->gen_ptr();
+    return new BasicLoadValue(LLVMBuildStructGEP2(curr_builder,
+                                                  source_type->llvm_type(),
+                                                  struct_ptr, index, UN),
+                              type);
+  }
+};
+
+/// PropAccessExprAST - Expression class for accessing properties (a.size).
+class PropAccessExprAST : public ExprAST {
+  bool is_ptr;
+  StructType *source_type;
+  unsigned int index;
+  Type *type = nullptr;
+
+public:
+  std::string key;
+  ExprAST *source;
+  PropAccessExprAST(std::string key, ExprAST *source)
+      : key(key), source(source) {}
+  void init() {
+    if (type)
+      return; // already initialized
+    Type *st = source->get_type();
+    if (st->type_type() == TypeType::Pointer) {
+      st = dynamic_cast<PointerType *>(source->get_type())->get_points_to();
+      is_ptr = true;
+    }
+    StructType *struct_t = dynamic_cast<StructType *>(st);
+    if (!struct_t)
+      error("Invalid property access for key '" + key + "', " +
+            st->stringify() + " is not a struct.");
+    index = struct_t->get_index(key);
+    type = struct_t->get_elem_type(index);
+    source_type = struct_t;
+  }
+
+  Type *get_type() {
+    init();
+    return type;
+  }
+
+  Value *gen_value() {
+    init();
+    Value *src = source->gen_value();
+    // If src is a struct-pointer (*String) then access on the value, if src
+    // is a struct-value (String) then access on the pointer to where it's
+    // stored.
     LLVMValueRef struct_ptr = is_ptr ? src->gen_val() : src->gen_ptr();
     return new BasicLoadValue(LLVMBuildStructGEP2(curr_builder,
                                                   source_type->llvm_type(),
@@ -630,120 +676,125 @@ public:
 
 /// MethodCallExprAST - Expression class for calling methods (a.len()).
 class MethodCallExprAST : public ExprAST {
-  CallExprAST *underlying_call;
-
-public:
-  MethodCallExprAST(char *name, size_t name_len, ExprAST *source,
-                    ExprAST **args, size_t args_len) {
-    ValueAndType *extension = curr_extension_methods[{
-        source->get_type(), std::string(name, name_len)}];
+  CallExprAST *underlying_call = nullptr;
+  CallExprAST *get_call() {
+    if (underlying_call)
+      return underlying_call;
+    ValueAndType *extension =
+        curr_extension_methods[{source->get_type(), name}];
+    bool ptr = !extension;
+    if (ptr)
+      extension = curr_extension_methods[{source->get_type()->ptr(), name}];
     if (extension) {
-      ExprAST **args_with_this = realloc_arr<ExprAST *>(args, args_len + 1);
-      args_with_this[args_len] = source;
-      underlying_call =
-          new CallExprAST(extension, args_with_this, args_len + 1);
+      args.push_back(ptr ? new UnaryExprAST('&', source) : source);
+      return underlying_call = new CallExprAST(extension, args);
     } else {
       // call stored pointer to function
-      auto prop = new PropAccessExprAST(name, name_len, source);
-      underlying_call = new CallExprAST(prop, args, args_len);
+      auto prop = new PropAccessExprAST(name, source);
+      return underlying_call = new CallExprAST(prop, args);
     }
   }
 
-  Type *get_type() { return underlying_call->get_type(); }
-  Value *gen_value() { return underlying_call->gen_value(); }
+public:
+  std::string name;
+  ExprAST *source;
+  std::vector<ExprAST *> args;
+  MethodCallExprAST(std::string name, ExprAST *source,
+                    std::vector<ExprAST *> args)
+      : name(name), source(source), args(args) {}
+
+  Type *get_type() { return get_call()->get_type(); }
+  Value *gen_value() { return get_call()->gen_value(); }
 };
 
 /// NewExprAST - Expression class for creating an instance of a struct (new
 /// String { pointer = "hi", length = 2 } ).
 class NewExprAST : public ExprAST {
-  StructType *s_type;
-  PointerType *p_type;
-  unsigned int *indexes;
-  char **keys;
-  ExprAST **values;
-  unsigned int key_count;
 
 public:
-  NewExprAST(StructType *s_type, char **keys, size_t *key_lens,
-             ExprAST **values, unsigned int key_count)
-      : s_type(s_type), values(values), key_count(key_count) {
-    indexes = alloc_arr<unsigned int>(key_count);
-    for (unsigned int i = 0; i < key_count; i++)
-      indexes[i] = s_type->get_index(keys[i], key_lens[i]);
-    p_type = new PointerType(s_type);
-  }
-
-  Type *get_type() { return p_type; }
+  TypeAST *s_type;
+  std::vector<std::pair<std::string, ExprAST *>> fields;
+  NewExprAST(TypeAST *s_type,
+             std::vector<std::pair<std::string, ExprAST *>> fields)
+      : s_type(s_type), fields(fields) {}
+  Type *get_type() { return s_type->type()->ptr(); }
 
   Value *gen_value() {
-    LLVMValueRef ptr =
-        LLVMBuildMalloc(curr_builder, s_type->llvm_type(), "malloc");
-    for (unsigned int i = 0; i < key_count; i++) {
-      LLVMValueRef llvm_indexes[2] = {
-          LLVMConstInt(LLVMInt32Type(), 0, false),
-          LLVMConstInt(LLVMInt32Type(), indexes[i], false)};
+    StructType *st = dynamic_cast<StructType *>(s_type->type());
+    if (!st)
+      error("Cannot create instance of non-struct type " +
+            s_type->type()->stringify());
+    LLVMValueRef ptr = LLVMBuildMalloc(curr_builder, st->llvm_type(), "malloc");
+    for (size_t i = 0; i < fields.size(); i++) {
+      auto &[key, value] = fields[i];
       LLVMValueRef set_ptr = LLVMBuildStructGEP2(
-          curr_builder, s_type->llvm_type(), ptr, indexes[i], "tmpgep");
+          curr_builder, st->llvm_type(), ptr, st->get_index(key), key.c_str());
       LLVMBuildStore(
           curr_builder,
-          values[i]->gen_value()->cast_to(s_type->get_elem_type(i))->gen_val(),
+          value->gen_value()->cast_to(st->get_elem_type(i))->gen_val(),
           set_ptr);
     }
-    return new ConstValue(p_type, ptr);
+    return new ConstValue(st->ptr(), ptr);
   }
 };
 
 class TupleExprAST : public ExprAST {
-  TupleType *type;
-  PointerType *p_type;
-  ExprAST **values;
-  size_t length;
+  std::vector<ExprAST *> values;
+  TupleType *t_type;
+  Type *_type = nullptr;
 
 public:
-  bool use_malloc;
-  TupleExprAST(ExprAST **values, size_t length)
-      : values(values), length(length) {
-    Type **types = alloc_arr<Type *>(length);
-    for (size_t i = 0; i < length; i++)
-      types[i] = values[i]->get_type();
-    type = new TupleType(types, length);
-    p_type = new PointerType(type);
+  bool is_new;
+  TupleExprAST(std::vector<ExprAST *> values) : values(values) {}
+
+  Type *get_type() {
+    if (_type)
+      return _type;
+    std::vector<Type *> types;
+    for (auto &value : values)
+      types.push_back(value->get_type());
+    t_type = new TupleType(types);
+    if (is_new)
+      return _type = t_type->ptr();
+    else
+      return _type = t_type;
   }
 
-  Type *get_type() { return p_type; }
-
   Value *gen_value() {
-    LLVMValueRef ptr = (use_malloc ? LLVMBuildMalloc : LLVMBuildAlloca)(
-        curr_builder, type->llvm_type(), use_malloc ? "malloc" : "alloca");
-    for (size_t i = 0; i < length; i++) {
-      LLVMValueRef llvm_indexes[2] = {LLVMConstInt(LLVMInt32Type(), 0, false),
-                                      LLVMConstInt(LLVMInt32Type(), i, false)};
+    Type *type = get_type();
+    LLVMValueRef ptr = (is_new ? LLVMBuildMalloc : LLVMBuildAlloca)(
+        curr_builder, t_type->llvm_type(), is_new ? "malloc" : "alloca");
+    for (size_t i = 0; i < values.size(); i++) {
       LLVMValueRef set_ptr = LLVMBuildStructGEP2(
-          curr_builder, type->llvm_type(), ptr, i, "tmpgep");
+          curr_builder, t_type->llvm_type(), ptr, i, "tupleset");
       LLVMBuildStore(curr_builder, values[i]->gen_value()->gen_val(), set_ptr);
     }
-    return new ConstValue(p_type, ptr);
+    if (is_new)
+      return new ConstValue(type, ptr);
+    else
+      return new BasicLoadValue(ptr, type);
   }
 };
 
 class BlockExprAST : public ExprAST {
-  ExprAST **exprs;
-  size_t exprs_len;
-  Type *type;
 
 public:
-  BlockExprAST(ExprAST **exprs, size_t exprs_len)
-      : exprs(exprs), exprs_len(exprs_len) {
-    if (exprs_len == 0)
+  std::vector<ExprAST *> exprs;
+  BlockExprAST(std::vector<ExprAST *> exprs) : exprs(exprs) {
+    if (exprs.size() == 0)
       error("block can't be empty.");
-    type = exprs[exprs_len - 1]->get_type();
   }
-  Type *get_type() { return type; }
+  Type *get_type() {
+    // initialize previous exprs
+    for (size_t i = 0; i < exprs.size() - 1; i++)
+      exprs[i]->get_type();
+    return exprs.back()->get_type();
+  }
   Value *gen_value() {
     // generate code for all exprs and only return last expr
-    for (unsigned int i = 0; i < exprs_len - 1; i++)
+    for (size_t i = 0; i < exprs.size() - 1; i++)
       exprs[i]->gen_value();
-    return exprs[exprs_len - 1]->gen_value();
+    return exprs.back()->gen_value();
   }
 };
 
@@ -758,30 +809,81 @@ public:
   }
 };
 
+class TypeAssertExprAST : public ExprAST {
+public:
+  TypeAST *a;
+  TypeAST *b;
+  TypeAssertExprAST(TypeAST *a, TypeAST *b) : a(a), b(b) {}
+  Type *get_type() { return new VoidType(); }
+  Value *gen_value() {
+    if (a->eq(b))
+      return NullExprAST(get_type()).gen_value();
+    else
+      error("Type mismatch in Type assertion, " + a->stringify() +
+            " != " + b->stringify());
+  }
+};
+
+class TypeDumpExprAST : public ExprAST {
+public:
+  TypeAST *type;
+  TypeDumpExprAST(TypeAST *type) : type(type) {}
+  Type *get_type() { return new VoidType(); }
+  Value *gen_value() {
+    std::cout << "[DUMP] Dumped type: " << type->stringify();
+    return NullExprAST(get_type()).gen_value();
+  }
+};
+
+/// TypeIfExprAST - Expression class for ifs based on type.
+class TypeIfExprAST : public ExprAST {
+  ExprAST *ret_expr = nullptr;
+  ExprAST *pick() {
+    if (ret_expr)
+      return ret_expr;
+    return ret_expr = a->type()->eq(b->type()) ? then : elze;
+  }
+
+public:
+  ExprAST *then, *elze;
+  TypeAST *a, *b;
+  TypeIfExprAST(TypeAST *a, TypeAST *b, ExprAST *then,
+                // elze because else cant be a variable name lol
+                ExprAST *elze)
+      : a(a), b(b), then(then), elze(elze) {}
+
+  Type *get_type() { return pick()->get_type(); }
+  Value *gen_value() { return pick()->gen_value(); }
+};
+
 /// IfExprAST - Expression class for if/then/else.
 class IfExprAST : public ExprAST {
 public:
   ExprAST *cond, *then, *elze;
   Type *type;
-  IfExprAST(ExprAST *cond, ExprAST *then,
-            // elze because else cant be a variable name lol
-            ExprAST *elze)
-      : cond(cond), then(then) {
+  void init() {
     Type *then_t = then->get_type();
     type = then_t;
     if (elze == nullptr)
       elze = new NullExprAST(type);
     Type *else_t = elze->get_type();
     if (then_t->neq(else_t))
-      error("conditional's then and else side don't have the same "
-            "type, %s does not match %s.",
-            then_t->stringify(), else_t->stringify());
-    this->elze = elze;
+      error("conditional's then and else side don't have the same type, " +
+            then_t->stringify() + " does not match " + else_t->stringify() +
+            ".");
+  }
+  IfExprAST(ExprAST *cond, ExprAST *then,
+            // elze because else cant be a variable name lol
+            ExprAST *elze)
+      : cond(cond), then(then), elze(elze) {}
+
+  Type *get_type() {
+    init();
+    return type;
   }
 
-  Type *get_type() { return type; }
-
   Value *gen_value() {
+    init();
     // cast to bool
     LLVMValueRef cond_v =
         cond->gen_value()->cast_to(new NumType(1, false, false))->gen_val();
@@ -820,6 +922,7 @@ class WhileExprAST : public IfExprAST {
 public:
   using IfExprAST::IfExprAST; // inherit constructor from IfExprAST
   Value *gen_value() {
+    init();
     // cast to bool
     LLVMValueRef cond_v =
         cond->gen_value()->cast_to(new NumType(1, false, false))->gen_val();
@@ -865,6 +968,7 @@ public:
              ExprAST *elze)
       : init(init), post(post), IfExprAST(cond, body, elze) {}
   Value *gen_value() {
+    IfExprAST::init();
     init->gen_value(); // let i = 0
 
     // cast to bool
@@ -904,77 +1008,31 @@ public:
   }
 };
 
-/// PrototypeAST - This class represents the "prototype" for a function,
-/// which captures its name, and its argument names (thus implicitly the
-/// number of arguments the function takes).
-class PrototypeAST {
-public:
-  const char **arg_names;
-  size_t *arg_name_lengths;
-  Type **arg_types;
-  FunctionType *type;
-  unsigned int arg_count;
-  char *name;
-  size_t name_len;
-  ValueAndType *vt;
-  PrototypeAST(char *name, size_t name_len, const char **arg_names,
-               size_t *arg_name_lengths, Type **arg_types,
-               unsigned int arg_count, Type *return_type, bool vararg)
-      : name(name), name_len(name_len), arg_names(arg_names),
-        arg_name_lengths(arg_name_lengths), arg_types(arg_types),
-        arg_count(arg_count) {
-    for (unsigned i = 0; i != arg_count; ++i)
-      curr_named_variables[std::string(arg_names[i], arg_name_lengths[i])] =
-          new ValueAndType(arg_types[i]);
-    type = new FunctionType(return_type, arg_types, arg_count, vararg);
-    vt = new ValueAndType(type);
-    curr_named_variables[std::string(name, name_len)] = vt;
-  }
-  PrototypeAST(Type *this_type, char *name, size_t name_len,
-               const char **arg_names, size_t *arg_name_lengths,
-               Type **arg_types, unsigned int arg_count, Type *return_type,
-               bool vararg) {
-    char *called_type = LLVMPrintTypeToString(this_type->llvm_type());
-    size_t cn_len = strlen(called_type) + 1 + name_len;
-    char *compiled_name = alloc_c(cn_len);
-    strcat(compiled_name, called_type);
-    strcat(compiled_name, ":");
-    strcat(compiled_name, name);
-    LLVMDisposeMessage(called_type);
-    arg_count++;
-    arg_names = realloc_arr<const char *>(arg_names, arg_count);
-    arg_names[arg_count - 1] = strdup("this");
-    arg_name_lengths = realloc_arr<size_t>(arg_name_lengths, arg_count);
-    arg_name_lengths[arg_count - 1] = 4;
-    arg_types = realloc_arr<Type *>(arg_types, arg_count);
-    arg_types[arg_count - 1] = this_type;
-    this->name = compiled_name, this->name_len = cn_len,
-    this->arg_names = arg_names, this->arg_name_lengths = arg_name_lengths,
-    this->arg_types = arg_types, this->arg_count = arg_count;
-    for (unsigned i = 0; i != arg_count; ++i)
-      curr_named_variables[std::string(arg_names[i], arg_name_lengths[i])] =
-          new ValueAndType(arg_types[i]);
-    vt = new ValueAndType(
-        type = new FunctionType(return_type, arg_types, arg_count, vararg));
-    curr_extension_methods[{this_type, std::string(name, name_len)}] = vt;
-  }
-  FunctionType *get_type() { return type; }
-  LLVMValueRef codegen() {
-    LLVMValueRef func = LLVMAddFunction(curr_module, name, type->llvm_type());
-    curr_func_type = type;
-    vt->value = new FuncValue(type, func);
-    curr_named_variables[std::string(name, name_len)] = vt;
-    // Set names for all arguments.
-    LLVMValueRef *params = alloc_arr<LLVMValueRef>(arg_count);
-    LLVMGetParams(func, params);
-    for (unsigned i = 0; i != arg_count; ++i)
-      LLVMSetValueName2(params[i], arg_names[i], arg_name_lengths[i]);
+class StructAST : public TopLevelAST {
+  StructTypeAST type;
 
-    LLVMSetValueName2(func, name, name_len);
-    LLVMPositionBuilderAtEnd(curr_builder, LLVMGetFirstBasicBlock(func));
-    return func;
+public:
+  StructAST(std::string name,
+            std::vector<std::pair<std::string, TypeAST *>> members)
+      : type(name, members) {}
+  LLVMValueRef gen_toplevel() {
+    curr_named_types[type.name] = type.type();
+    return nullptr;
   }
 };
+
+class TypeDefAST : public TopLevelAST {
+  std::string name;
+  TypeAST *type;
+
+public:
+  TypeDefAST(std::string name, TypeAST *type) : name(name), type(type) {}
+  LLVMValueRef gen_toplevel() {
+    curr_named_types[name] = type->type();
+    return nullptr;
+  }
+};
+
 /// DeclareExprAST - Expression class for defining an declare.
 class DeclareExprAST : public TopLevelAST {
   LetExprAST *let = nullptr;
@@ -984,101 +1042,16 @@ class DeclareExprAST : public TopLevelAST {
 public:
   DeclareExprAST(LetExprAST *let) : let(let) {
     type = let->get_type();
-    curr_named_variables[std::string(let->id, let->id_len)] =
-        new ValueAndType(type);
+    curr_named_variables[let->id] = new ValueAndType(type);
   }
   DeclareExprAST(PrototypeAST *prot) : prot(prot) {
     type = prot->get_type();
-    curr_named_variables[std::string(prot->name, prot->name_len)] =
-        new ValueAndType(type);
+    curr_named_variables[prot->name] = new ValueAndType(type);
   }
   LLVMValueRef gen_toplevel() {
     if (let)
       return let->gen_declare();
     else
       return prot->codegen();
-  }
-};
-
-/// FunctionAST - This class represents a function definition itself.
-class FunctionAST : public TopLevelAST {
-  ExprAST *body;
-
-public:
-  PrototypeAST *proto;
-  FunctionAST(PrototypeAST *proto, ExprAST *body) {
-    if (proto->type->return_type == nullptr)
-      proto->type->return_type = body->get_type();
-    this->proto = proto;
-    this->body = body;
-  }
-
-  LLVMValueRef gen_toplevel() {
-    // First, check for an existing function from a previous 'declare'
-    // declaration.
-    LLVMValueRef func = LLVMGetNamedFunction(curr_module, proto->name);
-
-    if (!func)
-      func = proto->codegen();
-
-    if (!func)
-      error("funcless behavior");
-
-    if (LLVMCountBasicBlocks(func) != 0)
-      error("Function cannot be redefined.");
-
-    auto block = LLVMAppendBasicBlockInContext(curr_ctx, func, "");
-    LLVMPositionBuilderAtEnd(curr_builder, block);
-    size_t args_len = LLVMCountParams(func);
-    LLVMValueRef *params = alloc_arr<LLVMValueRef>(args_len);
-    LLVMGetParams(func, params);
-    for (unsigned i = 0; i != args_len; ++i) {
-      size_t len = 0;
-      const char *name = LLVMGetValueName2(params[i], &len);
-      curr_named_variables[std::string(name, len)]->value =
-          new ConstValue(proto->arg_types[i], params[i]);
-    }
-    Value *ret_val = body->gen_value()->cast_to(proto->type->return_type);
-    // Finish off the function.
-    LLVMBuildRet(curr_builder, ret_val->gen_val());
-    unnamed_acc = 0;
-    return func;
-    // doesnt exist in c api (i think)
-    // // Validate the generated code, checking for consistency.
-    // // verifyFunction(*TheFunction);
-  }
-};
-
-class StructAST : public TopLevelAST {
-  char *name;
-  size_t name_len;
-  char **names;
-  size_t *name_lengths;
-  Type **types;
-  unsigned int count;
-
-public:
-  StructAST(char *name, size_t name_len, char **names, size_t *name_lengths,
-            Type **types, unsigned int count)
-      : name(name), name_len(name_len), names(names),
-        name_lengths(name_lengths), types(types), count(count) {}
-  LLVMValueRef gen_toplevel() {
-    curr_named_types[std::string(name, name_len)] =
-        new StructType(name, name_len, names, name_lengths, types, count);
-    return nullptr;
-  }
-};
-
-class TypeDefAST : public TopLevelAST {
-  char *name;
-  size_t name_len;
-  Type *type;
-
-public:
-  TypeDefAST(char *name, size_t name_len, Type *type)
-      : name(name), name_len(name_len), type(type) {}
-  LLVMValueRef gen_toplevel() {
-    curr_named_types[std::string(name, name_len)] = type;
-    return nullptr;
   }
 };

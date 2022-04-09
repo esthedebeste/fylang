@@ -4,7 +4,7 @@ type number = int32
 
 fun main(): number {
 	let a: number = 2 * 4
-	eputs("2 * 4 = ")
-	eputn(a)
+	prints("2 * 4 = ")
+	printn(a)
 	0
 }

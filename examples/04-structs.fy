@@ -4,9 +4,9 @@ struct String {
 	pointer: *char,
 	length: unsigned int
 }
-fun print_to_stdout(str: *String) 
+fun print_to_stdout(str: *String)
 	for(let i = 0; i < str.length; i += 1)
-		eputc(str.pointer[i])
+		printc(str.pointer[i])
 
 fun main() {
 	const str: *String = new String { pointer = "Hello from structs.fy!", length = 22 }

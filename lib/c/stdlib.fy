@@ -57,7 +57,7 @@ declare fun abs(j: int): int
 	declare fun abs(j: float): float
 	declare fun abs(j: double): double
 	declare fun abs(j: _long_double): _long_double
-*/ 
+*/
 
 declare fun labs(j: _long_int): _long_int
 declare fun llabs(j: _long_long_int): _long_long_int

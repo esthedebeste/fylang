@@ -1,28 +1,32 @@
 include "std/io"
 struct Num { x: int }
 
-fun heap(): *Num
+fun heap()
 	new Num { x = 1 }
-fun stack(): Num {
+fun stack() {
 	let b: Num
 	b.x = 2
 	b
 }
 
-fun tuple() 
-   *(3, )
+fun tuple()
+   (3, )
 
-fun tuple_ptr() 
+fun tuple_ptr()
    new (4, )
 
 fun main() {
 	let a = heap()
-	eputn(a.x)
+	printn(a.x)
+	ASSERT_TYPE typeof(a) == *Num
 	let b = stack()
-	eputn(b.x)
+	printn(b.x)
+	ASSERT_TYPE typeof(b) == Num
 	let c = tuple()
-	eputn(c.0)
+	printn(c.0)
+	ASSERT_TYPE typeof(c) == { int }
 	let d = tuple_ptr()
-	eputn(d.0)
+	printn(d.0)
+	ASSERT_TYPE typeof(d) == *{ int }
 	0
 }

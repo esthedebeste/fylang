@@ -1,49 +1,13 @@
 #pragma once
 #include "consts.cpp"
-// Shortcut for '(Elem*) calloc(amount, sizeof(Elem))'
-template <typename Elem> inline Elem *alloc_arr(size_t amount) {
-  return (Elem *)calloc(amount, sizeof(Elem));
-}
-// Shortcut for '(Elem*) reallocarray(ptr, amount, sizeof(Elem))'
-template <typename Elem> inline Elem *realloc_arr(Elem *ptr, size_t amount) {
-  return (Elem *)reallocarray(ptr, amount, sizeof(Elem));
-}
-inline char *alloc_c(size_t amount) { return alloc_arr<char>(amount); }
-inline char *realloc_c(char *ptr, size_t amount) {
-  return realloc_arr<char>(ptr, amount);
-}
 
-static bool streql(const char *a, const char *b, const size_t len) {
-  for (size_t i = 0; i < len; i++)
-    if (a[i] != b[i])
-      return false;
-  return true;
-}
-// streql for const char[n]
-#define streq_lit(a, alen, b) ((sizeof(b) - 1) == (alen)) && streql(a, b, alen)
-static bool streq(const char *a, const char *b) { return strcmp(a, b) == 0; }
-// assumes that num_str actually has that base
-static unsigned int parse_pos_int(char *num_str, size_t num_str_len,
-                                  unsigned int base = 10) {
-  unsigned int result = 0;
-  for (size_t i = 0; i < num_str_len; i++)
-    result = result * base + (num_str[i] > '9' ? num_str[i] >= 'A'
-                                                     ? num_str[i] - 'A' + 10
-                                                     : num_str[i] - 'a' + 10
-                                               : num_str[i] - '0');
-  return result;
-}
-static const char *num_to_str(unsigned int num, unsigned short base = 10) {
-  if (num == 0)
-    return "0";
-  size_t len = log(num) / log(base) + 1;
-  char *buf = alloc_c(len);
-  for (size_t i = len; i > 0; i--) {
-    unsigned short curr = num % base;
-    num = num / base;
-    buf[i - 1] = curr < 10 ? curr + '0' : curr + 'a' - 10;
-  }
-  return buf;
+template <typename A, typename B>
+std::vector<B> seconds(const std::vector<std::pair<A, B>> &array) {
+  size_t len = array.size();
+  std::vector<B> res(len);
+  for (size_t i = 0; i < len; ++i)
+    res[i] = array[i].second;
+  return res;
 }
 
 size_t unnamed_acc = 0;
@@ -53,20 +17,24 @@ const char *next_unnamed() {
   if (num == 0)
     return "a"; // log(0) would fail so shortcut with correct result
   size_t len = log(num) / log(52) + 1;
-  char *buf = alloc_c(len);
+  char *buf = new char[len + 1];
   for (size_t i = len; i > 0; i--) {
     unsigned short curr = num % 52;
     num /= 52;
     buf[i - 1] = curr < 26 ? curr + 'a' : curr + 'A' - 26;
   }
+  buf[len] = '\0';
   return buf;
 }
 // Unnamed symbol
 #define UN next_unnamed()
 
-#define error(format...) fprintf(stderr, "Error: " format), exit(1)
+inline _Noreturn void error(std::string err) {
+  std::cerr << "Error: " << err << std::endl;
+  exit(1);
+}
 #define STRINGIFY2(x) #x
 #define STRINGIFY(x) STRINGIFY2(x)
 #define debug_log(format...)                                                   \
   if (DEBUG)                                                                   \
-  fprintf(stderr, "[" __FILE__ ":" STRINGIFY(__LINE__) "] " format)
+  std::cerr << "[" << __FILE__ << ":" << __LINE__ << "] " << format << std::endl

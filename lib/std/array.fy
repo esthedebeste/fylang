@@ -4,19 +4,19 @@ include "c/stdlib"
 const PTR_SIZE = sizeof *unknown
 const NULLPTR = 0 as uint_ptrsize as *unknown
 struct Array {
-	ptr: **unknown, // TODO: generics/templates to type this pointer
+	ptr: *unknown[], // TODO: generics/templates to type this array
 	length: uint_ptrsize,
 	allocated: uint_ptrsize
 }
 
 fun create_array(): *Array
-	new Array { ptr = calloc(1, PTR_SIZE), length = 0, allocated = 1 }
+	new Array { ptr = malloc(/* 1 * */PTR_SIZE), length = 0, allocated = 1 }
 
 // returns the array's new length
 fun(*Array) push(added: *unknown): uint_ptrsize {
 	if(this.length >= this.allocated) {
 		this.allocated *= 2
-		this.ptr = reallocarray(this.ptr, this.allocated, PTR_SIZE) as **unknown
+		this.ptr = realloc(this.ptr, this.allocated * PTR_SIZE) as **unknown
 	}
 	this.ptr[this.length] = added
 	this.length += 1
@@ -26,7 +26,7 @@ fun(*Array) set(index: uint_ptrsize, to: *unknown): *unknown
 	this.ptr[index] = to
 
 fun(*Array) at(index: int_ptrsize): *unknown {
-	const i: int_ptrsize = if(index < 0) this.length as int_ptrsize + index else index 
+	const i: int_ptrsize = if(index < 0) this.length as int_ptrsize + index else index
 	if(i < 0 || i >= this.length)
 		NULLPTR
 	else

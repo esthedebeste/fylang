@@ -8,7 +8,7 @@ fun print_filtered(str: *char, predicate: *fun(char): bool) {
 	for(let i = 0; i < len; i += 1) {
 		let char = str[i]
 		if(predicate(char))
-			eputc(char)
+			printc(char)
 	}
 }
 

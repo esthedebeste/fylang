@@ -54,53 +54,37 @@ public:
   LLVMBasicBlockRef b_bb;
   Value *b_v;
   Type *type;
-  LLVMValueRef load = nullptr;
+  LLVMValueRef load;
   LLVMValueRef ptr = nullptr;
   PHIValue(LLVMBasicBlockRef a_bb, Value *a_v, LLVMBasicBlockRef b_bb,
            Value *b_v)
       : a_bb(a_bb), a_v(a_v), b_bb(b_bb), b_v(b_v) {
     type = a_v->get_type(); // TODO
-    gen_val();
-    if (has_ptr())
-      gen_ptr();
+    bool mk_ptr = a_v->has_ptr() && b_v->has_ptr();
+    LLVMBasicBlockRef curr = LLVMGetInsertBlock(curr_builder);
+    LLVMPositionBuilderBefore(
+        curr_builder, LLVMGetLastInstruction(a_bb)); /* before the terminator */
+    LLVMValueRef a_val = a_v->gen_val();
+    LLVMValueRef a_ptr = mk_ptr ? a_v->gen_ptr() : nullptr;
+    LLVMPositionBuilderBefore(
+        curr_builder, LLVMGetLastInstruction(b_bb)); /* before the terminator */
+    LLVMValueRef b_val = b_v->gen_val();
+    LLVMValueRef b_ptr = mk_ptr ? b_v->gen_ptr() : nullptr;
+    LLVMValueRef incoming_v[2] = {a_val, b_val};
+    LLVMValueRef incoming_p[2] = {a_ptr, b_ptr};
+    LLVMBasicBlockRef incoming_bb[2] = {a_bb, b_bb};
+    LLVMPositionBuilderAtEnd(curr_builder, curr);
+    load = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), UN);
+    LLVMAddIncoming(load, incoming_v, incoming_bb, 2);
+    if (mk_ptr) {
+      ptr = LLVMBuildPhi(curr_builder, get_type()->ptr()->llvm_type(), UN);
+      LLVMAddIncoming(ptr, incoming_p, incoming_bb, 2);
+    }
   }
   Type *get_type() { return type; }
-  LLVMValueRef gen_val() {
-    if (load)
-      return load;
-    LLVMBasicBlockRef curr = LLVMGetInsertBlock(curr_builder);
-    LLVMPositionBuilderBefore(
-        curr_builder, LLVMGetLastInstruction(a_bb)); // before the terminator
-    LLVMValueRef a = a_v->gen_val();
-    LLVMPositionBuilderBefore(
-        curr_builder, LLVMGetLastInstruction(b_bb)); // before the terminator
-    LLVMValueRef b = b_v->gen_val();
-    LLVMValueRef incoming_v[2] = {a, b};
-    LLVMBasicBlockRef incoming_bb[2] = {a_bb, b_bb};
-    LLVMPositionBuilderAtEnd(curr_builder, curr);
-    LLVMValueRef phi = LLVMBuildPhi(curr_builder, get_type()->llvm_type(), UN);
-    LLVMAddIncoming(phi, incoming_v, incoming_bb, 2);
-    return load = phi;
-  }
-  LLVMValueRef gen_ptr() {
-    if (ptr)
-      return ptr;
-    LLVMBasicBlockRef curr = LLVMGetInsertBlock(curr_builder);
-    LLVMPositionBuilderBefore(
-        curr_builder, LLVMGetLastInstruction(a_bb)); // before the terminator
-    LLVMValueRef a = a_v->gen_ptr();
-    LLVMPositionBuilderBefore(
-        curr_builder, LLVMGetLastInstruction(b_bb)); // before the terminator
-    LLVMValueRef b = b_v->gen_ptr();
-    LLVMValueRef incoming_v[2] = {a, b};
-    LLVMBasicBlockRef incoming_bb[2] = {a_bb, b_bb};
-    LLVMPositionBuilderAtEnd(curr_builder, curr);
-    LLVMValueRef phi = LLVMBuildPhi(
-        curr_builder, (new PointerType(get_type()))->llvm_type(), UN);
-    LLVMAddIncoming(phi, incoming_v, incoming_bb, 2);
-    return ptr = phi;
-  }
-  bool has_ptr() { return a_v->has_ptr() && b_v->has_ptr(); }
+  LLVMValueRef gen_val() { return load; }
+  LLVMValueRef gen_ptr() { return ptr; }
+  bool has_ptr() { return ptr != nullptr; }
 };
 
 LLVMValueRef gen_num_cast(LLVMValueRef value, NumType *a, Type *b) {
@@ -125,32 +109,25 @@ LLVMValueRef gen_num_cast(LLVMValueRef value, NumType *a, Type *b) {
     return LLVMBuildIntCast2(curr_builder, value, num->llvm_type(),
                              a->is_signed, UN);
   } else if (b->type_type() == TypeType::Pointer) {
-    if (a->byte_size == LLVMPointerSize(target_data))
-      return LLVMBuildBitCast(curr_builder, value, b->llvm_type(), UN);
-    else
-      error("Can only cast a pointersize number to a pointer");
+    return LLVMBuildIntToPtr(curr_builder, value, b->llvm_type(), UN);
   }
   error("Numbers can't be casted to non-numbers yet");
 }
 
 LLVMValueRef gen_ptr_cast(LLVMValueRef value, PointerType *a, Type *b) {
-  if (PointerType *ptr = dynamic_cast<PointerType *>(b))
-    return LLVMBuildPointerCast(curr_builder, value, ptr->llvm_type(), UN);
-  else if (NumType *num = dynamic_cast<NumType *>(b)) {
-    if (num->byte_size == LLVMPointerSize(target_data))
-      return LLVMBuildBitCast(curr_builder, value, b->llvm_type(), UN);
-    else
-      error("Can't cast a pointer to a non-pointersize number");
-  }
+  if (b->type_type() == TypeType::Pointer)
+    return LLVMBuildPointerCast(curr_builder, value, b->llvm_type(), UN);
+  else if (b->type_type() == TypeType::Number)
+    return LLVMBuildPtrToInt(curr_builder, value, b->llvm_type(), UN);
   error("Pointers can't be casted to non-pointers yet");
 }
 
 LLVMValueRef gen_arr_cast(LLVMValueRef value, ArrayType *a, Type *b) {
   if (PointerType *ptr = dynamic_cast<PointerType *>(b)) {
     if (ptr->get_points_to()->neq(a->get_elem_type()))
-      error("Array can't be casted to pointer with different type, %s does not "
-            "match %s.",
-            ptr->get_points_to()->stringify(), a->get_elem_type()->stringify());
+      error("Array can't be casted to pointer with different type, " +
+            ptr->get_points_to()->stringify() + " does not match " +
+            a->get_elem_type()->stringify() + ". ");
     LLVMValueRef zeros[2] = {
         LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false),
         LLVMConstInt((new NumType(64, false, false))->llvm_type(), 0, false)};
@@ -171,7 +148,7 @@ LLVMValueRef cast(LLVMValueRef source, Type *src, Type *to) {
     return gen_ptr_cast(source, ptr, to);
   if (ArrayType *tup = dynamic_cast<ArrayType *>(src))
     return gen_arr_cast(source, tup, to);
-  error("Invalid cast (%s to %s)", src->stringify(), to->stringify());
+  error("Invalid cast from " + src->stringify() + " to " + to->stringify());
 }
 
 class CastValue : public Value {
@@ -191,19 +168,17 @@ CastValue *Value::cast_to(Type *to) { return new CastValue(this, to); }
 class NamedValue : public Value {
 public:
   Value *val;
-  char *name;
-  size_t name_len;
-  NamedValue(Value *val, char *name, size_t name_len)
-      : val(val), name(name), name_len(name_len) {}
+  std::string name;
+  NamedValue(Value *val, std::string name) : val(val), name(name) {}
   Type *get_type() { return val->get_type(); }
   LLVMValueRef gen_val() {
     LLVMValueRef value = val->gen_val();
-    LLVMSetValueName2(value, name, name_len);
+    LLVMSetValueName2(value, name.c_str(), name.size());
     return value;
   }
   LLVMValueRef gen_ptr() {
     LLVMValueRef value = val->gen_ptr();
-    LLVMSetValueName2(value, name, name_len);
+    LLVMSetValueName2(value, name.c_str(), name.size());
     return value;
   }
   bool has_ptr() { return val->has_ptr(); }

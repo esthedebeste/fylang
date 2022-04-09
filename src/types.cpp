@@ -1,11 +1,10 @@
 #pragma once
 #include "utils.cpp"
 
-static LLVMTypeRef void_type =
-    LLVMStructCreateNamed(LLVMGetGlobalContext(), "void");
+static LLVMTypeRef void_type = LLVMStructType(nullptr, 0, true);
 
 enum TypeType : int { Void, Number, Pointer, Function, Array, Struct, Tuple };
-static const char *tt_to_str(TypeType tt) {
+static std::string tt_to_str(TypeType tt) {
   switch (tt) {
   case Void:
     return "void";
@@ -23,23 +22,32 @@ static const char *tt_to_str(TypeType tt) {
     return "tuple";
   }
 };
+class PointerType;
 /// Base type class.
 class Type {
 public:
   virtual ~Type() {}
   virtual LLVMTypeRef llvm_type() = 0;
   virtual TypeType type_type() = 0;
-  virtual bool eq(Type *other) {
-    return this->type_type() == other->type_type();
-  };
+  virtual bool eq(Type *other) = 0;
   virtual bool neq(Type *other) { return !eq(other); }
-  virtual const char *stringify() { error("stringify not implemented yet"); }
+  virtual std::string stringify() { error("stringify not implemented yet"); }
   bool operator==(Type *other) { return eq(other); }
   bool operator!=(Type *other) { return neq(other); }
-  virtual size_t hash() = 0;
+  PointerType *ptr();
+  virtual size_t _hash() = 0;
 };
 template <> struct std::hash<Type *> {
-  std::size_t operator()(Type *const &s) const noexcept { return s->hash(); }
+  std::size_t operator()(Type *const &s) const noexcept { return s->_hash(); }
+};
+template <typename T> inline size_t hash(T t) { return std::hash<T>()(t); }
+template <> struct std::hash<std::vector<Type *>> {
+  size_t operator()(const std::vector<Type *> type) const {
+    size_t res = 0;
+    for (auto t : type)
+      res = (res << 5) + t->_hash();
+    return res ^ std::hash<size_t>()(type.size());
+  }
 };
 
 class VoidType : public Type {
@@ -47,8 +55,9 @@ public:
   VoidType() {}
   LLVMTypeRef llvm_type() { return void_type; }
   TypeType type_type() { return TypeType::Void; }
-  const char *stringify() { return "void"; }
-  size_t hash() { return std::hash<int>()(TypeType::Void); }
+  bool eq(Type *other) { return other->type_type() == TypeType::Void; }
+  std::string stringify() { return "void"; }
+  size_t _hash() { return hash(TypeType::Void); }
 };
 
 class NumType : public Type {
@@ -59,14 +68,14 @@ public:
   bool is_signed;
   NumType(unsigned int bits, bool is_floating, bool is_signed)
       : bits(bits), is_floating(is_floating), is_signed(is_signed) {
-    byte_size = bits * 8;
+    byte_size = bits / 8;
   }
-  NumType(char *bits_str, size_t bits_str_len, bool is_floating, bool is_signed)
+  NumType(std::string bits_str, bool is_floating, bool is_signed)
       : is_floating(is_floating), is_signed(is_signed) {
-    if (streq_lit(bits_str, bits_str_len, "_ptrsize"))
+    if (bits_str == "_ptrsize")
       bits = LLVMPointerSize(target_data) * 8;
     else
-      bits = parse_pos_int(bits_str, bits_str_len, 10);
+      bits = std::stoi(bits_str);
     byte_size = bits / 8;
   }
   // Pointer-size
@@ -87,7 +96,7 @@ public:
     case 128:
       return LLVMFP128Type();
     default:
-      error("floating %d-bit numbers don't exist", bits);
+      error("floating " + std::to_string(bits) + "-bit numbers don't exist");
     }
   }
   TypeType type_type() { return TypeType::Number; }
@@ -97,19 +106,13 @@ public:
              other_n->is_signed == is_signed;
     return false;
   }
-  const char *stringify() {
-    const char *typ = is_floating ? "float" : is_signed ? "int" : "uint";
-    char *str = alloc_c(strlen(typ) + log10(bits));
-    strcat(str, typ);
-    strcat(str, num_to_str(bits));
-    return str;
+  std::string stringify() {
+    std::string typ = is_floating ? "float" : is_signed ? "int" : "uint";
+    return typ + std::to_string(bits);
   }
-  size_t hash() {
-    size_t h = 0;
-    h ^= std::hash<unsigned int>()(bits);
-    h ^= std::hash<bool>()(is_floating);
-    h ^= std::hash<bool>()(is_signed);
-    return h ^ std::hash<int>()(TypeType::Number);
+  size_t _hash() {
+    return hash(bits) ^ hash(is_floating) ^ hash(is_signed) ^
+           hash(TypeType::Number);
   }
 };
 class PointerType : public Type {
@@ -129,17 +132,10 @@ public:
     return false;
   }
 
-  const char *stringify() {
-    const char *contains = points_to->stringify();
-    char *str = alloc_c(1 /* '*' */ + strlen(contains));
-    str[0] = '*';
-    strcat(str + 1, contains);
-    return str;
-  }
-  size_t hash() {
-    return points_to->hash() ^ std::hash<int>()(TypeType::Pointer);
-  }
+  std::string stringify() { return "*" + points_to->stringify(); }
+  size_t _hash() { return hash(points_to) ^ hash(TypeType::Pointer); }
 };
+PointerType *Type::ptr() { return new PointerType(this); }
 class ArrayType : public Type {
 public:
   Type *elem;
@@ -155,35 +151,23 @@ public:
     return false;
   }
 
-  const char *stringify() {
-    const char *contains = elem->stringify();
-    size_t count_len = log10(count);
-    char *str = alloc_c(2 + strlen(contains) + 3 + count_len + 2);
-    strcat(str, "( ");
-    strcat(str, contains);
-    strcat(str, " * ");
-    strcat(str, num_to_str(count));
-    strcat(str, " )");
-    return str;
+  std::string stringify() {
+    return elem->stringify() + "[" + std::to_string(count) + "]";
   }
-  size_t hash() {
-    return elem->hash() ^ std::hash<unsigned int>()(count) ^
-           std::hash<int>()(TypeType::Array);
-  }
+  size_t _hash() { return hash(elem) ^ hash(count) ^ hash(TypeType::Array); }
 };
 class TupleType : public Type {
 public:
   LLVMTypeRef llvm_struct_type;
-  Type **types;
-  size_t length;
-  TupleType(Type **types, size_t length) : types(types), length(length) {
-    LLVMTypeRef *llvm_types = alloc_arr<LLVMTypeRef>(length);
-    for (size_t i = 0; i < length; i++)
+  std::vector<Type *> types;
+  TupleType(std::vector<Type *> types) : types(types) {
+    LLVMTypeRef *llvm_types = new LLVMTypeRef[types.size()];
+    for (size_t i = 0; i < types.size(); i++)
       llvm_types[i] = types[i]->llvm_type();
-    llvm_struct_type = LLVMStructType(llvm_types, length, true);
+    llvm_struct_type = LLVMStructType(llvm_types, types.size(), true);
   }
   Type *get_elem_type(size_t index) {
-    if (index >= length)
+    if (index >= types.size())
       error("Struct get_elem_type index out of bounds");
     return types[index];
   }
@@ -191,68 +175,50 @@ public:
   TypeType type_type() { return TypeType::Tuple; }
   bool eq(Type *other) {
     if (TupleType *other_s = dynamic_cast<TupleType *>(other)) {
-      if (other_s->length == 0)
+      if (other_s->types.size() == 0)
         return true; // empty tuple is equal to any other tuple, for `unknown`
-      if (other_s->length != length)
+      if (other_s->types.size() != types.size())
         return false;
-      for (size_t i = 0; i < length; i++)
+      for (size_t i = 0; i < types.size(); i++)
         if (other_s->types[i]->neq(types[i]))
           return false;
       return true;
     }
     return false;
   }
-  const char *stringify() {
-    size_t len = 4;
-    size_t *lens = alloc_arr<size_t>(length);
-    const char **strs = alloc_arr<const char *>(length);
-    for (size_t i = 0; i < length; i++) {
-      strs[i] = types[i]->stringify();
-      len += lens[i] = strlen(strs[i]);
+  std::string stringify() {
+    std::stringstream res;
+    res << "{ ";
+    for (size_t i = 0; i < types.size(); i++) {
+      if (i != 0)
+        res << ", ";
+      res << types[i]->stringify();
     }
-    len += length * 2;
-    char *buf = alloc_arr<char>(len);
-    strcpy(buf, "{ ");
-    for (size_t i = 0; i < length; i++) {
-      strncat(buf, strs[i], lens[i]);
-      strncat(buf, ", ", 2);
-    }
-    strncat(buf, " }", 2);
-    return buf;
+    res << " }";
+    return res.str();
   }
-  size_t hash() {
-    size_t h = 0;
-    for (size_t i = 0; i < length; i++)
-      h ^= types[i]->hash();
-    return h ^ std::hash<size_t>()(length) ^ std::hash<int>()(TypeType::Tuple);
+  size_t _hash() {
+    return hash(types) ^ hash(types.size()) ^ hash(TypeType::Tuple);
   }
 };
 class StructType : public TupleType {
 public:
-  char *name;
-  size_t name_len;
-  char **keys;
-  size_t *key_lengths;
-  StructType(char *name, size_t name_len, char **keys, size_t *key_lengths,
-             Type **types, size_t length)
-      : TupleType(types, length), name(name), name_len(name_len), keys(keys),
-        key_lengths(key_lengths) {
-    LLVMTypeRef *llvm_types = alloc_arr<LLVMTypeRef>(length);
-    for (size_t i = 0; i < length; i++)
+  std::string name;
+  std::vector<std::pair<std::string, Type *>> fields;
+  StructType(std::string name,
+             std::vector<std::pair<std::string, Type *>> fields)
+      : name(name), fields(fields), TupleType(seconds(fields)) {
+    LLVMTypeRef *llvm_types = new LLVMTypeRef[fields.size()];
+    for (size_t i = 0; i < fields.size(); i++)
       llvm_types[i] = types[i]->llvm_type();
-    llvm_struct_type = LLVMStructCreateNamed(curr_ctx, name);
-    LLVMStructSetBody(llvm_struct_type, llvm_types, length, true);
+    llvm_struct_type = LLVMStructCreateNamed(curr_ctx, name.c_str());
+    LLVMStructSetBody(llvm_struct_type, llvm_types, fields.size(), true);
   }
-  size_t get_index(char *name, size_t name_len) {
-    for (size_t i = 0; i < length; i++) {
-      if (key_lengths[i] == name_len) {
-        for (size_t j = 0; j < name_len; j++)
-          if (keys[i][j] != name[j])
-            continue;
+  size_t get_index(std::string name) {
+    for (size_t i = 0; i < fields.size(); i++)
+      if (fields[i].first == name)
         return i;
-      }
-    }
-    error("Struct does not have key");
+    error("Struct does not have key " + name);
   }
   LLVMTypeRef llvm_type() { return llvm_struct_type; }
   TypeType type_type() { return TypeType::Struct; }
@@ -262,75 +228,54 @@ public:
       return this == other_s;
     return false;
   }
-  const char *stringify() { return name; }
-  size_t hash() {
+  std::string stringify() { return name; }
+  size_t _hash() {
     size_t h = 0;
-    for (size_t i = 0; i < length; i++)
-      h ^= types[i]->hash();
-    return h ^ std::hash<size_t>()(length) ^ std::hash<int>()(TypeType::Struct);
+    for (auto f : fields)
+      h ^= hash(f.first) ^ hash(f.second);
+    return h ^ hash(fields.size()) ^ hash(TypeType::Struct);
   }
 };
 class FunctionType : public Type {
 public:
   Type *return_type;
-  Type **arguments;
-  unsigned int arg_count;
+  std::vector<Type *> arguments;
   bool vararg;
 
-  FunctionType(Type *return_type, Type **arguments, unsigned int arg_count,
-               bool vararg)
-      : return_type(return_type), arguments(arguments), arg_count(arg_count),
-        vararg(vararg) {}
+  FunctionType(Type *return_type, std::vector<Type *> arguments, bool vararg)
+      : return_type(return_type), arguments(arguments), vararg(vararg) {}
   LLVMTypeRef llvm_type() {
-    LLVMTypeRef *llvm_args = alloc_arr<LLVMTypeRef>(arg_count);
-    for (unsigned int i = 0; i < arg_count; i++)
+    LLVMTypeRef *llvm_args = new LLVMTypeRef[arguments.size()];
+    for (size_t i = 0; i < arguments.size(); i++)
       llvm_args[i] = arguments[i]->llvm_type();
-    return LLVMFunctionType(return_type->llvm_type(), llvm_args, arg_count,
-                            vararg);
+    return LLVMFunctionType(return_type->llvm_type(), llvm_args,
+                            arguments.size(), vararg);
   }
   TypeType type_type() { return TypeType::Function; }
   bool eq(Type *other) {
     if (PointerType *ptr = dynamic_cast<PointerType *>(other))
       return this->eq(ptr->get_points_to());
     FunctionType *other_f = dynamic_cast<FunctionType *>(other);
-    if (!other_f)
+    if (!other_f || other_f->arguments.size() != arguments.size() ||
+        other_f->vararg != vararg || other_f->return_type->neq(return_type))
       return false;
-    if (other_f->arg_count != arg_count)
-      return false;
-    if (other_f->vararg != vararg)
-      return false;
-    if (other_f->return_type->neq(return_type))
-      return false;
-    for (unsigned int i = 0; i < arg_count; i++)
+    for (unsigned int i = 0; i < arguments.size(); i++)
       if (other_f->arguments[i]->neq(arguments[i]))
         return false;
     return true;
   };
-  const char *stringify() {
-    const char **arg_strs = alloc_arr<const char *>(arg_count);
-    size_t final_len = 7; /* "fun(): " */
-    for (unsigned int i = 0; i < arg_count; i++) {
-      const char *type = arguments[i]->stringify();
-      arg_strs[i] = type;
-      final_len += strlen(type) + 2 /*", "*/;
+  std::string stringify() {
+    std::stringstream res;
+    res << "fun(";
+    for (size_t i = 0; i < arguments.size(); i++) {
+      if (i != 0)
+        res << ", ";
+      res << arguments[i]->stringify();
     }
-    const char *ret_str = return_type->stringify();
-    final_len += strlen(ret_str);
-    char *str = alloc_c(final_len);
-    strcat(str, "fun(");
-    for (unsigned int i = 0; i < arg_count; i++) {
-      strcat(str, arg_strs[i]);
-      strcat(str, ", ");
-    }
-    strcat(str, "): ");
-    strcat(str, ret_str);
-    return str;
+    res << "): " << return_type->stringify();
+    return res.str();
   }
-  size_t hash() {
-    size_t h = 0;
-    for (unsigned int i = 0; i < arg_count; i++)
-      h ^= arguments[i]->hash();
-    return h ^ std::hash<size_t>()(arg_count) ^
-           std::hash<int>()(TypeType::Function);
+  size_t _hash() {
+    return hash(arguments) ^ hash(arguments.size()) ^ hash(TypeType::Function);
   }
 };

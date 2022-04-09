@@ -1,10 +1,10 @@
-#include "utils.cpp"
-
 #include "parser.cpp"
 #include "ucr.cpp"
+#include "utils.cpp"
 static void handle_definition() {
   auto ast = parse_definition();
-  debug_log("Parsed a function definition (name: %s).\n", ast->proto->name);
+  debug_log("Parsed a function definition (name: " << ast->proto->name
+                                                   << ").\n");
   auto val = ast->gen_toplevel();
   if (DEBUG)
     LLVMDumpValue(val);
@@ -18,7 +18,7 @@ static void handle_declare() {
     LLVMDumpValue(val);
 }
 static void handle_global_let() {
-  auto ast = parse_let_expr(true);
+  auto ast = parse_let_expr();
   debug_log("Parsed a global variable\n");
   auto val = ast->gen_toplevel();
   if (DEBUG)
@@ -35,9 +35,9 @@ static void handle_global_type() {
   ast->gen_toplevel();
 }
 static void handle_global_include() {
-  char *file_name = parse_include();
-  debug_log("Parsed an include (%s)\n", file_name);
-  CharReader *curr_file = queue[queue_len - 1];
+  std::string file_name = parse_include();
+  debug_log("Parsed an include (" << file_name << ")");
+  CharReader *curr_file = queue.back();
   add_file_to_queue(curr_file->file_path, file_name);
   get_next_token();
 }
@@ -71,31 +71,39 @@ static void main_loop() {
       handle_global_type();
       break;
     default:
-      error("Unexpected token '%c' (%d) at top-level", curr_token, curr_token);
+      error("Unexpected token '" + token_to_str(curr_token) + "' at top-level");
     }
   }
 }
 
 int main(int argc, char **argv) {
-  if (argc != 3) {
-    printf("Usage: %s <filename> <output>\n", argv[0]);
+  if (argc < 2) {
+    printf("Usage: %s [run|com] <filename> (output)\n", argv[0]);
+    return 1;
+  }
+  char *input = argv[2];
+  std::string mode_str = argv[1];
+  enum { COMPILE, RUN } mode;
+  if (mode_str == "run")
+    mode = RUN;
+  else if (mode_str == "com")
+    mode = COMPILE;
+  else {
+    printf("Usage: %s [run|com] <filename> (output)\n", argv[0]);
     return 1;
   }
 
   if (getenv("DEBUG"))
     DEBUG = true;
-  if (getenv("QUIET"))
-    QUIET = true;
-  std_dir = get_relative_path(argv[0], (char *)"../lib");
+  bool QUIET = getenv("QUIET");
+  std_dir = dirname(argv[0]) + "/../lib";
   // host machine triple
   char *target_triple = LLVMGetDefaultTargetTriple();
   LLVMTargetRef target;
   char *error_message;
-  LLVMInitializeAllTargets();
-  LLVMInitializeAllTargetInfos();
-  LLVMInitializeAllTargetMCs();
+  LLVMInitializeNativeTarget();
   if (LLVMGetTargetFromTriple(target_triple, &target, &error_message) != 0)
-    error("%s", error_message);
+    error(error_message);
   char *host_cpu_name = LLVMGetHostCPUName();
   char *host_cpu_features = LLVMGetHostCPUFeatures();
   LLVMTargetMachineRef target_machine = LLVMCreateTargetMachine(
@@ -103,7 +111,7 @@ int main(int argc, char **argv) {
       LLVMCodeGenLevelAggressive, LLVMRelocStatic, LLVMCodeModelSmall);
   target_data = LLVMCreateTargetDataLayout(target_machine);
   // create module
-  curr_module = LLVMModuleCreateWithName(argv[1]);
+  curr_module = LLVMModuleCreateWithName(input);
   // set target to current machine
   LLVMSetTarget(curr_module, target_triple);
   LLVMSetModuleDataLayout(curr_module, target_data);
@@ -111,24 +119,54 @@ int main(int argc, char **argv) {
   curr_builder = LLVMCreateBuilder();
   curr_ctx = LLVMGetGlobalContext();
   // open .fy file
-  add_file_to_queue((char *)".", argv[1]);
+  add_file_to_queue(".", input);
   // parse and compile everything into LLVM IR
   main_loop();
   if (!getenv("NO_UCR"))
     remove_unused_globals(curr_module,
                           LLVMGetNamedFunction(curr_module, "main"));
-  // export LLVM IR into other file
-  char *output = LLVMPrintModuleToString(curr_module);
-  FILE *output_file = fopen(argv[2], "w");
-  fputs(output, output_file);
-  printf("\nSuccessfully compiled %s to %s\n", argv[1], argv[2]);
-  // dispose of a bunch of stuff
-  LLVMDisposeMessage(output);
-  LLVMDisposeModule(curr_module);
-  LLVMDisposeBuilder(curr_builder);
-  LLVMDisposeMessage(target_triple);
-  LLVMDisposeMessage(host_cpu_name);
-  LLVMDisposeMessage(host_cpu_features);
-  LLVMDisposeTargetMachine(target_machine);
-  return 0;
+  if (mode == COMPILE) {
+    std::string out = argv[3];
+    size_t ext_pos = out.rfind('.');
+    size_t slash_pos = out.rfind('/');
+    std::string ext = ext_pos == std::string::npos || slash_pos > ext_pos
+                          ? "ll" // default to LLVM IR
+                          : out.substr(ext_pos + 1);
+    char *err = nullptr;
+    // export LLVM IR into other file
+    if (ext == "bc")
+      LLVMWriteBitcodeToFile(curr_module, out.c_str());
+    else if (ext == "asm")
+      LLVMTargetMachineEmitToFile(target_machine, curr_module,
+                                  strdup(out.c_str()), LLVMAssemblyFile, &err);
+    else if (ext == "o")
+      LLVMTargetMachineEmitToFile(target_machine, curr_module,
+                                  strdup(out.c_str()), LLVMObjectFile, &err);
+    else if (ext == "ll")
+      LLVMPrintModuleToFile(curr_module, out.c_str(), &err);
+    else
+      error("Unknown file extension: " + ext);
+
+    if (err)
+      error(err);
+    if (!QUIET)
+      std::cout << "\n  Successfully compiled " << input << " to " << out
+                << std::endl;
+    return 0;
+  } else if (mode == RUN) {
+    LLVMInitializeNativeAsmPrinter();
+    LLVMInitializeNativeAsmParser();
+    LLVMExecutionEngineRef engine;
+    char *err;
+    bool errored =
+        LLVMCreateJITCompilerForModule(&engine, curr_module, 0, &err);
+    if (errored)
+      error(std::string("JIT Failed: ") + err);
+    int exit_code = LLVMRunFunctionAsMain(
+        engine, LLVMGetNamedFunction(curr_module, "main"), 0, NULL, NULL);
+    if (!QUIET)
+      std::cout << "\n  Executed with exit code " << exit_code << std::endl;
+    return exit_code;
+  }
+  error("Unreachable");
 }

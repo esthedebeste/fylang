@@ -2,7 +2,7 @@
 include "stddef.fy"
 
 // these are only ever referred to in pointers within stdio so we can unknown them for the time being. (todo: type them properly)
-type FILE = unknown 
+type FILE = unknown
 type fpos_t = unknown
 type off_t = unknown
 
@@ -35,7 +35,7 @@ declare fun sscanf(s: *char, format: *char, __VARARG__): int
  declare fun vsnprintf(s: *char, n: size_t, format: *char, arg: va_list): int
  declare fun vsprintf(s: *char, format: *char, arg: va_list): int
  declare fun vsscanf(s: *char, format: *char, arg: va_list): int
-*/ 
+*/
 declare fun fgetc(stream: *FILE): int
 declare fun fgets(s: *char, n: int, stream: *FILE): *char
 declare fun fputc(c: int, stream: *FILE): int

@@ -2,39 +2,34 @@
 #include "reader.cpp"
 #include "utils.cpp"
 
-static size_t identifier_string_length;
-static char
-    *identifier_string;   // [a-zA-Z][a-zA-Z0-9]* - Filled in if T_IDENTIFIER
-static char char_value;   // '[^']' - Filled in if T_CHAR
-static char *num_value;   // Filled in if T_NUMBER
-static size_t num_length; // len(num_value) - Filled in if T_NUMBER
+static std::string
+    identifier_string;  // [a-zA-Z][a-zA-Z0-9]* - Filled in if T_IDENTIFIER
+static char char_value; // '[^']' - Filled in if T_CHAR
+static std::string num_value; // Filled in if T_NUMBER
 static bool
     num_has_dot;      // Whether num_value contains '.' - Filled in if T_NUMBER
 static char num_type; // Type of number. 'd' => double, 'f' => float, 'i' =>
                       // int32, 'u' => uint32, 'b' => byte/char/uint8
-static char *string_value;   // "[^"]*" - Filled in if T_STRING
-static size_t string_length; // len(string_value) - Filled in if T_STRING
+static std::string string_value; // "[^"]*" - Filled in if T_STRING
 
-static int last_char = ' ';
-static void read_str(bool (*predicate)(char), char **output, size_t *length) {
-  size_t curr_size = 512;
-  char *str = alloc_c(curr_size);
-  static size_t str_len = 0;
-  str[0] = last_char;
-  str_len = 1;
-  while (predicate(last_char = next_char())) {
-    if (str_len > curr_size) {
-      curr_size *= 2;
-      str = realloc_c(str, curr_size);
-    }
-    str[str_len] = last_char;
-    str_len++;
+static std::string token_to_str(const int token) {
+  switch (token) {
+  case T_IDENTIFIER:
+    return identifier_string + " (identifier)";
+  default:
+    if (token < 0)
+      return token_strs.at((Token)token);
+    else
+      return std::string(1, token);
   }
-  str[str_len] = '\0';
-  str = realloc_c(str, str_len + 1);
-  *output = str;
-  *length = str_len;
-  return;
+}
+static char last_char = ' ';
+static std::string read_str(bool (*predicate)(char)) {
+  std::stringstream stream;
+  stream << last_char;
+  while (predicate(last_char = next_char()))
+    stream << last_char;
+  return stream.str();
 }
 // isdigit(c) || c=='.'
 static bool is_numish(char c) {
@@ -68,7 +63,7 @@ static char get_escape(char escape_char) {
   case '0':
     return '\0';
   default:
-    error("Invalid escape '\\%c'", escape_char);
+    error((std::string) "Invalid escape '" + escape_char + "'");
   }
 }
 
@@ -79,43 +74,14 @@ static int next_token() {
   if (last_char == EOF)
     return T_EOF;
   if (isalpha(last_char) || last_char == '_') {
-    read_str(&is_alphaish, &identifier_string, &identifier_string_length);
-#define T_eq(str) streq_lit(identifier_string, identifier_string_length, str)
-#define token(str, t)                                                          \
-  if (T_eq(str))                                                               \
-  return t
-#define etoken(str, t) else if (T_eq(str)) return t
-    token("fun", T_FUNCTION);
-    etoken("declare", T_DECLARE);
-    etoken("if", T_IF);
-    etoken("else", T_ELSE);
-    etoken("let", T_LET);
-    etoken("const", T_CONST);
-    etoken("while", T_WHILE);
-    etoken("struct", T_STRUCT);
-    etoken("new", T_NEW);
-    etoken("include", T_INCLUDE);
-    etoken("type", T_TYPE);
-    etoken("unsigned", T_UNSIGNED);
-    etoken("signed", T_SIGNED);
-    etoken("as", T_AS);
-    // __ because vararg can't be used outside of declarations
-    etoken("__VARARG__", T_VARARG);
-    etoken("typeof", T_TYPEOF);
-    etoken("true", T_TRUE);
-    etoken("false", T_FALSE);
-    etoken("return", T_RETURN);
-    etoken("for", T_FOR);
-    etoken("DUMP", T_DUMP);
-    etoken("sizeof", T_SIZEOF);
-#undef etoken
-#undef token
-#undef T_eq
+    identifier_string = read_str(&is_alphaish);
+    if (Token keyword = keywords[identifier_string])
+      return keyword;
     return T_IDENTIFIER;
   } else if (isdigit(last_char)) {
     // Number: [0-9]+.?[0-9]*
     num_has_dot = false;
-    read_str(&is_numish, &num_value, &num_length);
+    num_value = read_str(&is_numish);
     if (last_char == 'd' || last_char == 'l' || last_char == 'f' ||
         last_char == 'i' || last_char == 'u' || last_char == 'b') {
       num_type = last_char;
@@ -131,32 +97,23 @@ static int next_token() {
     return T_NUMBER;
   } else if (last_char == '"') {
     // String: "[^"]*"
-    size_t curr_size = 512;
-    char *str = alloc_c(curr_size);
-    size_t str_len = 0;
+    std::stringstream stream;
     while ((last_char = next_char()) != '"') {
       if (last_char == EOF)
         error("Unexpected EOF in string");
-      if (str_len > curr_size - 1) { // leave room for null-byte
-        curr_size *= 2;
-        str = realloc_c(str, curr_size);
-      }
       if (last_char == '\\')
-        str[str_len] = get_escape(next_char());
+        stream << get_escape(next_char());
       else
-        str[str_len] = last_char;
-      str_len++;
+        stream << last_char;
     }
-    str[str_len++] = '\0';
-    string_value = str;
-    string_length = str_len;
+    string_value = stream.str();
     last_char = next_char();
     return T_STRING;
   } else if (last_char == '\'') {
     // Char: '[^']'
     last_char = next_char(); // eat '
     if (last_char == EOF || last_char == '\n' || last_char == '\r')
-      error("Unterminated char\n");
+      error("Unterminated char");
     if (last_char == '\\')
       char_value = get_escape(next_char());
     else

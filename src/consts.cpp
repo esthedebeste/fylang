@@ -1,22 +1,22 @@
 #pragma once
-#include <ctype.h>
-#include <libgen.h>
-#include <malloc.h>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 #include <math.h>
-#include <memory>
-#include <stdbool.h>
-#include <stdio.h>
+#include <sstream>
 #include <stdlib.h>
 #include <string.h>
 #include <string>
 #include <unordered_map>
+#include <vector>
 extern "C" {
+#include "llvm-c-15/llvm-c/BitWriter.h"
 #include "llvm-c-15/llvm-c/Core.h"
+#include "llvm-c-15/llvm-c/ExecutionEngine.h"
 #include "llvm-c-15/llvm-c/TargetMachine.h"
 }
 bool DEBUG = false;
-bool QUIET = false;
-char *std_dir;
+std::string std_dir;
 enum Token : const int {
   T_EOF = -0xffff, // end of file
   T_IDENTIFIER,    // foo
@@ -59,6 +59,7 @@ enum Token : const int {
   T_ANDEQ,         // &=
   T_OREQ,          // |=
   T_DUMP,          // DUMP
+  T_ASSERT_TYPE,   // ASSERT_TYPE
 };
 
 static LLVMContextRef curr_ctx;
@@ -85,4 +86,73 @@ static std::unordered_map<int, int> binop_precedence = {
 static std::unordered_map<int, int> op_eq_ops = {
     {T_PLUSEQ, '+'},    {T_MINEQ, '-'}, {T_STAREQ, '*'}, {T_SLASHEQ, '/'},
     {T_PERCENTEQ, '%'}, {T_ANDEQ, '&'}, {T_OREQ, '|'},
+};
+static std::unordered_map<Token, std::string> token_strs = {
+    {T_EOF, "EOF"},
+    {T_IDENTIFIER, "identifier"},
+    {T_NUMBER, "number"},
+    {T_STRING, "string"},
+    {T_CHAR, "char"},
+    {T_BOOL, "boolean"},
+    {T_IF, "if"},
+    {T_ELSE, "else"},
+    {T_WHILE, "while"},
+    {T_RETURN, "return"},
+    {T_FUNCTION, "fun"},
+    {T_DECLARE, "declare"},
+    {T_LET, "let"},
+    {T_CONST, "const"},
+    {T_STRUCT, "struct"},
+    {T_NEW, "new"},
+    {T_EQEQ, "=="},
+    {T_LEQ, "<="},
+    {T_GEQ, ">="},
+    {T_NEQ, "!="},
+    {T_LOR, "||"},
+    {T_LAND, "&&"},
+    {T_INCLUDE, "include"},
+    {T_TYPE, "type"},
+    {T_UNSIGNED, "unsigned"},
+    {T_SIGNED, "signed"},
+    {T_AS, "as"},
+    {T_VARARG, "__VARARG__"},
+    {T_TYPEOF, "typeof"},
+    {T_SIZEOF, "sizeof"},
+    {T_TRUE, "true"},
+    {T_FALSE, "false"},
+    {T_FOR, "for"},
+    {T_PLUSEQ, "+="},
+    {T_MINEQ, "-="},
+    {T_STAREQ, "*="},
+    {T_SLASHEQ, "/="},
+    {T_PERCENTEQ, "%="},
+    {T_ANDEQ, "&="},
+    {T_OREQ, "|="},
+    {T_DUMP, "DUMP"},
+    {T_ASSERT_TYPE, "ASSERT_TYPE"},
+};
+static std::unordered_map<std::string, Token> keywords = {
+    {"if", T_IF},
+    {"else", T_ELSE},
+    {"while", T_WHILE},
+    {"return", T_RETURN},
+    {"fun", T_FUNCTION},
+    {"declare", T_DECLARE},
+    {"let", T_LET},
+    {"const", T_CONST},
+    {"struct", T_STRUCT},
+    {"new", T_NEW},
+    {"include", T_INCLUDE},
+    {"type", T_TYPE},
+    {"unsigned", T_UNSIGNED},
+    {"signed", T_SIGNED},
+    {"as", T_AS},
+    {"__VARARG__", T_VARARG},
+    {"typeof", T_TYPEOF},
+    {"sizeof", T_SIZEOF},
+    {"true", T_TRUE},
+    {"false", T_FALSE},
+    {"for", T_FOR},
+    {"DUMP", T_DUMP},
+    {"ASSERT_TYPE", T_ASSERT_TYPE},
 };

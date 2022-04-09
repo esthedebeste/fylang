@@ -1,31 +1,30 @@
 #pragma once
-#include "asts.cpp"
 #include "lexer.cpp"
+
+#include "asts/asts.cpp"
+#include "asts/functions.cpp"
+#include "asts/types.cpp"
 #include "types.cpp"
 #include "utils.cpp"
 static int curr_token;
 static int get_next_token() { return curr_token = next_token(); }
-static int eat(const int expected_token, const char *exp_name = nullptr) {
-  if (curr_token != expected_token) {
-    if (exp_name == nullptr)
-      error("Error: Unexpected token '%c' (%d), expected '%c'", curr_token,
-            curr_token, expected_token);
-    else
-      error("Error: Unexpected token '%c' (%d), expected '%s'", curr_token,
-            curr_token, exp_name);
-  } else
-    return get_next_token();
+static void eat(const int expected_token) {
+  if (curr_token != expected_token)
+    error("Unexpected token '" + token_to_str(curr_token) + "', expected '" +
+          token_to_str(expected_token) + "'");
+  get_next_token();
 }
 static ExprAST *parse_expr();
 static ExprAST *parse_primary();
 static ExprAST *parse_unary();
 
-static Type *parse_type_unary();
-static Type *parse_function_type() {
-  eat(T_FUNCTION, (char *)"fun");
+static TypeAST *parse_type_unary();
+static TypeAST *parse_type_postfix();
+inline TypeAST *parse_type() { return parse_type_postfix(); }
+static TypeAST *parse_function_type() {
+  eat(T_FUNCTION);
   eat('(');
-  Type **arg_types = alloc_arr<Type *>(64);
-  size_t args_len = 0;
+  std::vector<TypeAST *> arg_types;
   bool vararg = false;
   if (curr_token != ')') {
     while (1) {
@@ -34,69 +33,59 @@ static Type *parse_function_type() {
         vararg = true;
         break;
       }
-      if (auto arg = parse_type_unary())
-        arg_types[args_len++] = arg;
+      arg_types.push_back(parse_type());
       if (curr_token == ')')
         break;
-      if (curr_token != ',')
-        error("Expected ')' or ',' in argument list");
-      get_next_token();
+      eat(',');
     }
   }
   eat(')');
   eat(':');
-  Type *return_type = parse_type_unary();
-  return new FunctionType(return_type, arg_types, args_len, vararg);
+  TypeAST *return_type = parse_type();
+  return new FunctionTypeAST(return_type, arg_types, vararg);
 }
 
-static Type *parse_num_type() {
-  char *id = identifier_string;
-  size_t id_len = identifier_string_length;
-  eat(T_IDENTIFIER, (char *)"identifier");
+static TypeAST *parse_num_type() {
+  std::string id = identifier_string;
+  eat(T_IDENTIFIER);
 #define strlen(str) (sizeof(str) - 1)
-#define check_type(str, is_floating, is_signed)                                \
-  if (id_len >= strlen(str) && streql(id, str, strlen(str)))                   \
-    if (id_len > strlen(str))                                                  \
-      return new NumType(id + strlen(str), id_len - strlen(str), is_floating,  \
-                         is_signed);                                           \
+#define check_type(str, flt, sgn)                                              \
+  if (id.find(str) == 0)                                                       \
+    if (id.size() == strlen(str))                                              \
+      return type_ast(new NumType(32, flt, sgn));                              \
     else                                                                       \
-      return new NumType(32, is_floating, is_signed)
+      return type_ast(new NumType(id.substr(strlen(str)), flt, sgn))
   check_type("uint", false, false);
   else check_type("int", false, true);
   else check_type("float", true, true);
-  else if (streq_lit(id, id_len, "void")) return new VoidType();
-  else if (curr_named_types[std::string(
-               id, id_len)]) return curr_named_types[std::string(id, id_len)];
-  else error("invalid type '%s'", id);
+  else return new NamedTypeAST(id);
 #undef strlen
 #undef check_type
 }
 
 static TypeDefAST *parse_type_definition() {
-  eat(T_TYPE, (char *)"type");
-  char *name = identifier_string;
-  size_t name_len = identifier_string_length;
-  eat(T_IDENTIFIER, (char *)"identifier");
+  eat(T_TYPE);
+  std::string name = identifier_string;
+  eat(T_IDENTIFIER);
   eat('=');
-  Type *t = parse_type_unary();
-  return new TypeDefAST(name, name_len, t);
+  TypeAST *t = parse_type();
+  return new TypeDefAST(name, t);
 }
 
-static Type *parse_tuple_type() {
+static TypeAST *parse_tuple_type() {
   eat('{');
-  Type **types = alloc_arr<Type *>(512);
-  unsigned int len = 0;
+  std::vector<TypeAST *> types;
   if (curr_token != '}')
     while (1) {
-      types[len++] = parse_type_unary();
+      types.push_back(parse_type());
       if (curr_token == '}')
         break;
       eat(',');
     }
   eat('}');
-  return new TupleType(types, len);
+  return new TupleTypeAST(types);
 }
-static Type *parse_type_unary() {
+static TypeAST *parse_type_unary() {
   switch (curr_token) {
   case T_FUNCTION:
     return parse_function_type();
@@ -104,58 +93,41 @@ static Type *parse_type_unary() {
     return parse_tuple_type();
   case T_TYPEOF:
     eat(T_TYPEOF);
-    return parse_expr()->get_type();
+    bool paren = curr_token == '(';
+    if (paren)
+      eat('(');
+    TypeAST *type = new TypeofAST(parse_expr());
+    if (paren)
+      eat(')');
+    return type;
   }
   // If the current token is not a unary type operator, just parse type
-  if (!(curr_token == '&' || curr_token == '*' || curr_token == T_UNSIGNED))
+  if (!(curr_token == '&' || curr_token == '*' || curr_token == T_UNSIGNED ||
+        curr_token == T_SIGNED))
     return parse_num_type();
   // If this is a unary operator, read it.
   int opc = curr_token;
-  get_next_token();
-  if (Type *operand = parse_type_unary()) {
-    if (opc == '*')
-      return new PointerType(operand);
-    else if (opc == '&') {
-      if (PointerType *ptr = dynamic_cast<PointerType *>(operand))
-        return ptr->get_points_to();
-      else
-        error("use of & type operator without pointer on right-hand side");
-    } else if (opc == T_UNSIGNED) {
-      if (NumType *num = dynamic_cast<NumType *>(operand))
-        if (num->is_floating)
-          error("unsigned floats don't exist");
-        else
-          return new NumType(num->bits, false, false);
-      else
-        error("use of `unsigned` type operator without number on right-hand "
-              "side");
-    } else if (opc == T_SIGNED) {
-      if (NumType *num = dynamic_cast<NumType *>(operand))
-        return new NumType(num->bits, num->is_floating, true);
-      else
-        error(
-            "use of `signed` type operator without number on right-hand side");
-    }
-  }
-  error("unknown unary op");
+  eat(opc);
+  TypeAST *operand = parse_type();
+  return new UnaryTypeAST(opc, operand);
 }
-static Type *parse_type_postfix() {
-  Type *prev = parse_type_unary();
+static TypeAST *parse_type_postfix() {
+  TypeAST *prev = parse_type_unary();
   while (1) {
     switch (curr_token) {
     case '[': {
       eat('[');
       if (curr_token == ']') {
         eat(']');
-        prev = new PointerType(prev);
+        prev = new UnaryTypeAST('*', prev);
+      } else {
+        std::string num = num_value;
+        if (num_has_dot)
+          error("List lengths have to be integers");
+        eat(T_NUMBER);
+        eat(']');
+        prev = new ArrayTypeAST(prev, std::stoi(num));
       }
-      char *num = num_value;
-      size_t num_len = num_length;
-      if (num_has_dot)
-        error("List lengths have to be integers");
-      eat(T_NUMBER);
-      eat(']');
-      prev = new ArrayType(prev, parse_pos_int(num, num_len, 10));
     }
     default:
       return prev;
@@ -164,19 +136,18 @@ static Type *parse_type_postfix() {
 }
 static ExprAST *parse_number_expr() {
   // TODO: parse number base (hex 0x, binary 0b, octal 0o)
-  auto result =
-      new NumberExprAST(num_value, num_length, num_type, num_has_dot, 10);
-  get_next_token(); // consume the number
+  auto result = new NumberExprAST(num_value, num_type, num_has_dot, 10);
+  eat(T_NUMBER);
   return result;
 }
 static ExprAST *parse_char_expr() {
   auto result = new CharExprAST(char_value);
-  get_next_token(); // consume char
+  eat(T_CHAR);
   return result;
 }
 static ExprAST *parse_string_expr() {
-  auto result = new StringExprAST(string_value, string_length);
-  get_next_token(); // consume string
+  auto result = new StringExprAST(string_value);
+  eat(T_STRING);
   return result;
 }
 /// parenexpr ::= '(' expression ')'
@@ -185,18 +156,17 @@ static ExprAST *parse_paren_expr() {
   auto expr = parse_expr();
   if (curr_token == ',') {
     eat(',');
-    ExprAST **exprs = alloc_arr<ExprAST *>(512);
-    size_t length = 1;
-    exprs[0] = expr;
+    std::vector<ExprAST *> exprs;
+    exprs.push_back(expr);
     if (curr_token != ')')
       while (1) {
-        exprs[length++] = parse_expr();
+        exprs.push_back(parse_expr());
         if (curr_token == ')')
           break;
         eat(',');
       }
     eat(')');
-    return new TupleExprAST(exprs, length);
+    return new TupleExprAST(exprs);
   }
   eat(')');
   return expr;
@@ -205,23 +175,42 @@ static ExprAST *parse_paren_expr() {
 /// identifierexpr
 ///   ::= identifier
 static ExprAST *parse_identifier_expr() {
-  char *id = identifier_string;
-  size_t id_len = identifier_string_length;
-  eat(T_IDENTIFIER, (char *)"identifier");
-  return new VariableExprAST(id, id_len);
+  std::string id = identifier_string;
+  eat(T_IDENTIFIER);
+  return new VariableExprAST(id);
 }
-/// ifexpr ::= 'if' (expression) expression 'else' expression
+/// ifexpr
+///   ::= 'if' (expression) expression ('else' expression)?
+///   ::= 'if' ('type' type == type) expression ('else' expression)?
 static ExprAST *parse_if_expr() {
   eat(T_IF);
-
-  auto cond = parse_paren_expr();
+  eat('(');
+  enum { EXPR_IF, TYPE_IF } returning = EXPR_IF;
+  ExprAST *cond;
+  TypeAST *a, *b;
+  if (curr_token == T_TYPE || curr_token == T_TYPEOF) {
+    // Type condition
+    if (curr_token == T_TYPE)
+      eat(T_TYPE);
+    a = parse_type();
+    eat(T_EQEQ);
+    b = parse_type();
+    returning = TYPE_IF;
+  } else
+    cond = parse_expr();
+  eat(')');
   auto then = parse_expr();
   ExprAST *elze = nullptr;
   if (curr_token == T_ELSE) {
     eat(T_ELSE);
     elze = parse_expr();
   }
-  return new IfExprAST(cond, then, elze);
+  switch (returning) {
+  case EXPR_IF:
+    return new IfExprAST(cond, then, elze);
+  case TYPE_IF:
+    return new TypeIfExprAST(a, b, then, elze);
+  }
 }
 /// whileexpr ::= 'while' (expression) expression else expression
 static ExprAST *parse_while_expr() {
@@ -255,74 +244,62 @@ static ExprAST *parse_for_expr() {
 }
 /// newexpr ::= 'new' type '{' (identifier '=' expr ',')* '}'
 static ExprAST *parse_new_expr() {
-  eat(T_NEW, (char *)"new");
+  eat(T_NEW);
   if (curr_token == '(') {
     // tuple on heap
     TupleExprAST *tuple = dynamic_cast<TupleExprAST *>(parse_paren_expr());
     if (tuple == nullptr)
       error("new tuple not a tuple, add a comma to the end");
-    tuple->use_malloc = true;
+    tuple->is_new = true;
     return tuple;
   }
-  auto type = dynamic_cast<StructType *>(parse_num_type());
-  if (!type)
-    error("new with non-struct value");
-  char **keys = alloc_arr<char *>(128);
-  size_t *key_lens = alloc_arr<size_t>(128);
-  ExprAST **values = alloc_arr<ExprAST *>(128);
-  unsigned int key_count = 0;
+  auto type = parse_num_type();
+  std::vector<std::pair<std::string, ExprAST *>> fields;
   eat('{');
   if (curr_token != '}')
     while (1) {
-      keys[key_count] = identifier_string;
-      key_lens[key_count] = identifier_string_length;
-      eat(T_IDENTIFIER, (char *)"identifier");
+      std::string key = identifier_string;
+      eat(T_IDENTIFIER);
       eat('=');
-      values[key_count] = parse_expr();
-      key_count++;
+      auto value = parse_expr();
+      fields.push_back(std::make_pair(key, value));
       if (curr_token == '}')
         break;
       eat(',');
     }
   eat('}');
 
-  return new NewExprAST(type, keys, key_lens, values, key_count);
+  return new NewExprAST(type, fields);
 }
 
 static ExprAST *parse_block() {
-  static const unsigned int MAX_EXPRS = 1024;
   eat('{');
-  ExprAST **exprs = alloc_arr<ExprAST *>(MAX_EXPRS);
-  unsigned int expr_i = 0;
+  std::vector<ExprAST *> exprs;
   while (curr_token != '}')
     if (curr_token == T_EOF)
       error("unclosed block");
-    else if (expr_i > MAX_EXPRS)
-      error("too many exprs in block (>1024)");
     else if (curr_token == ';')
       eat(';'); // ignore ;
     else
-      exprs[expr_i++] = parse_expr();
-  exprs = (ExprAST **)realloc_arr<ExprAST *>(exprs, expr_i);
+      exprs.push_back(parse_expr());
   eat('}');
-  return new BlockExprAST(exprs, expr_i);
+  return new BlockExprAST(exprs);
 }
 
-static LetExprAST *parse_let_expr(bool global = false) {
+static LetExprAST *parse_let_expr() {
   bool constant = false;
   if (curr_token == T_CONST) {
     constant = true;
     eat(T_CONST);
   } else
-    eat(T_LET, (char *)"let");
-  char *id = identifier_string;
-  size_t id_len = identifier_string_length;
-  Type *type = nullptr;
-  eat(T_IDENTIFIER, (char *)"variable name");
+    eat(T_LET);
+  std::string id = identifier_string;
+  TypeAST *type = nullptr;
+  eat(T_IDENTIFIER);
   // explicit typing
   if (curr_token == ':') {
     eat(':');
-    type = parse_type_unary();
+    type = parse_type();
   }
   ExprAST *value = nullptr;
   // immediate assign
@@ -331,7 +308,7 @@ static LetExprAST *parse_let_expr(bool global = false) {
     value = parse_expr();
   }
 
-  return new LetExprAST(id, id_len, type, value, constant, global);
+  return new LetExprAST(id, type, value, constant);
 }
 
 static BoolExprAST *parse_bool_expr() {
@@ -340,6 +317,19 @@ static BoolExprAST *parse_bool_expr() {
   return new BoolExprAST(val);
 }
 
+static ExprAST *parse_type_assertion() {
+  eat(T_ASSERT_TYPE);
+  TypeAST *a = parse_type();
+  eat(T_EQEQ);
+  TypeAST *b = parse_type();
+  return new TypeAssertExprAST(a, b);
+}
+
+static ExprAST *parse_type_dump() {
+  eat(T_DUMP);
+  TypeAST *a = parse_type();
+  return new TypeDumpExprAST(a);
+}
 /// primary
 ///   ::= identifierexpr
 ///   ::= numberexpr
@@ -347,8 +337,8 @@ static BoolExprAST *parse_bool_expr() {
 static ExprAST *parse_primary() {
   switch (curr_token) {
   default:
-    error("Error: unknown token '%c' (%d) when expecting an expression",
-          curr_token, curr_token);
+    error("Error: unexpected token '" + token_to_str(curr_token) +
+          "' when expecting an expression");
   case T_IDENTIFIER:
     return parse_identifier_expr();
   case T_NUMBER:
@@ -374,9 +364,9 @@ static ExprAST *parse_primary() {
   case T_FALSE:
     return parse_bool_expr();
   case T_DUMP:
-    eat(T_DUMP);
-    printf("[DUMP] Dumped type: %s", parse_type_unary()->stringify());
-    return parse_primary();
+    return parse_type_dump();
+  case T_ASSERT_TYPE:
+    return parse_type_assertion();
   case '{':
     return parse_block();
   }
@@ -392,27 +382,19 @@ static int get_token_precedence() {
   return t_prec;
 }
 
-struct ParseCallResult {
-  ExprAST **args;
-  size_t args_len = 0;
-};
-static ParseCallResult parse_call() {
+static std::vector<ExprAST *> parse_call() {
   eat('(');
-  ParseCallResult res;
-  res.args = alloc_arr<ExprAST *>(64);
-  res.args_len = 0;
+  std::vector<ExprAST *> args;
   if (curr_token != ')') {
     while (1) {
-      res.args[res.args_len++] = parse_expr();
+      args.push_back(parse_expr());
       if (curr_token == ')')
         break;
-      if (curr_token != ',')
-        error("Expected ')' or ',' in argument list");
-      get_next_token();
+      eat(',');
     }
   }
   eat(')');
-  return res;
+  return args;
 }
 /// unary
 ///   ::= primary
@@ -426,26 +408,24 @@ static ExprAST *parse_postfix() {
     case '.': {
       eat('.');
       if (curr_token == T_NUMBER) {
-        unsigned int idx = parse_pos_int(num_value, num_length, 10);
+        unsigned int idx = std::stoi(num_value);
         eat(T_NUMBER);
-        prev = new PropAccessExprAST(idx, prev);
+        prev = new NumAccessExprAST(idx, prev);
       } else {
-        char *id = identifier_string;
-        size_t id_len = identifier_string_length;
-        eat(T_IDENTIFIER, (char *)"identifier");
+        std::string id = identifier_string;
+        eat(T_IDENTIFIER);
         if (curr_token == '(') {
-          ParseCallResult call = parse_call();
-          prev =
-              new MethodCallExprAST(id, id_len, prev, call.args, call.args_len);
+          auto call = parse_call();
+          prev = new MethodCallExprAST(id, prev, call);
         } else
-          prev = new PropAccessExprAST(id, id_len, prev);
+          prev = new PropAccessExprAST(id, prev);
       }
       break;
     }
     case '(': {
       // function call
-      ParseCallResult call = parse_call();
-      prev = new CallExprAST(prev, call.args, call.args_len);
+      auto call = parse_call();
+      prev = new CallExprAST(prev, call);
       break;
     }
     case '[': {
@@ -459,7 +439,7 @@ static ExprAST *parse_postfix() {
     case T_AS: {
       // cast
       eat(T_AS);
-      Type *cast_to = parse_type_unary();
+      TypeAST *cast_to = parse_type();
       prev = new CastExprAST(prev, cast_to);
       break;
     }
@@ -474,7 +454,7 @@ static ExprAST *parse_unary() {
     bool paren = curr_token == '(';
     if (paren)
       eat('(');
-    Type *type = parse_type_unary();
+    TypeAST *type = parse_type();
     if (paren)
       eat(')');
     return new SizeofExprAST(type);
@@ -486,7 +466,7 @@ static ExprAST *parse_unary() {
 
   // If this is a unary operator, read it.
   int opc = curr_token;
-  get_next_token();
+  eat(opc);
   if (auto operand = parse_unary())
     return new UnaryExprAST(opc, operand);
   return nullptr;
@@ -507,7 +487,7 @@ static ExprAST *parse_bin_op_rhs(int expr_prec, ExprAST *LHS) {
 
     // Okay, we know this is a binop.
     int bin_op = curr_token;
-    get_next_token();        // eat binop
+    eat(bin_op);
     if (curr_token == '=') { // do op and then assign to LHS
       op_assign = true;
       eat('=');
@@ -538,24 +518,20 @@ static ExprAST *parse_expr() {
 /// prototype
 ///   ::= id '(' id* ')'
 ///   ::= '(' type ')' id '(' id* ')'
-static PrototypeAST *parse_prototype(Type *default_return_type = nullptr) {
-  Type *this_t = nullptr;
+static PrototypeAST *parse_prototype(TypeAST *default_return_type = nullptr) {
+  TypeAST *this_t = nullptr;
   if (curr_token == '(') {
     // type method
     eat('(');
-    this_t = parse_type_unary();
+    this_t = parse_type();
     eat(')');
   }
-  char *fn_name = identifier_string;
-  size_t fn_name_len = identifier_string_length;
-  eat(T_IDENTIFIER, (char *)"identifier");
+  std::string fn_name = identifier_string;
+  eat(T_IDENTIFIER);
   eat('(');
 
   // Read the list of argument names.
-  const char **arg_names = alloc_arr<const char *>(64);
-  size_t *arg_name_lens = alloc_arr<size_t>(64);
-  Type **arg_types = alloc_arr<Type *>(64);
-  unsigned int arg_count = 0;
+  std::vector<std::pair<std::string, TypeAST *>> args;
   bool vararg = false;
 
   if (curr_token != ')')
@@ -565,40 +541,33 @@ static PrototypeAST *parse_prototype(Type *default_return_type = nullptr) {
         vararg = true;
         break;
       }
-      arg_names[arg_count] = identifier_string;
-      arg_name_lens[arg_count] = identifier_string_length;
-      eat(T_IDENTIFIER, (char *)"identifier");
+      std::string arg_name = identifier_string;
+      eat(T_IDENTIFIER);
       eat(':');
-      arg_types[arg_count] = parse_type_unary();
-      arg_count++;
+      TypeAST *arg_type = parse_type();
+      args.push_back(std::make_pair(arg_name, arg_type));
       if (curr_token == ')')
         break;
-      if (curr_token != ',')
-        error("Expected ')' or ',' in argument list");
-      get_next_token();
+      eat(',');
     }
   eat(')');
-  Type *return_type;
+  TypeAST *return_type;
   if (curr_token == ':') {
     eat(':');
-    return_type = parse_type_unary();
+    return_type = parse_type();
   } else
     return_type = default_return_type;
 
   if (this_t)
-    return new PrototypeAST(this_t, fn_name, fn_name_len, arg_names,
-                            arg_name_lens, arg_types, arg_count, return_type,
-                            vararg);
+    return new MethodAST(this_t, fn_name, args, return_type, vararg);
   else
-    return new PrototypeAST(fn_name, fn_name_len, arg_names, arg_name_lens,
-                            arg_types, arg_count, return_type, vararg);
+    return new PrototypeAST(fn_name, args, return_type, vararg);
 }
 
 /// definition ::= 'fun' prototype expression
 static FunctionAST *parse_definition() {
-  eat(T_FUNCTION, (char *)"fun");
+  eat(T_FUNCTION);
   auto proto = parse_prototype(nullptr /* assume from body */);
-
   auto e = parse_expr();
   return new FunctionAST(proto, e);
 }
@@ -606,63 +575,51 @@ static FunctionAST *parse_definition() {
 ///   ::= 'fun' prototype
 ///   ::= 'let' identifier ':' type
 static DeclareExprAST *parse_declare() {
-  eat(T_DECLARE, (char *)"declare"); // eat declare.
+  eat(T_DECLARE); // eat declare.
   if (curr_token == T_FUNCTION) {
     eat(T_FUNCTION);
-    PrototypeAST *proto = parse_prototype(new NumType(32, false, true));
+    PrototypeAST *proto =
+        parse_prototype(type_ast(new NumType(32, false, true)));
     return new DeclareExprAST(proto);
   } else if (curr_token == T_CONST || curr_token == T_LET) {
     LetExprAST *let = parse_let_expr();
     return new DeclareExprAST(let);
   } else
-    eat(0, (char *)"fun', 'let', or 'const");
+    error("Unexpected 'declare " + token_to_str(curr_token) +
+          "', expected 'fun', 'let', or 'const'");
   return nullptr;
 }
 
 /// struct
 ///   ::= 'struct' identifier '{' (identifier: type)* '}'
 static StructAST *parse_struct() {
-  eat(T_STRUCT, (char *)"struct"); // eat struct.
-  char *struct_name = identifier_string;
-  size_t struct_name_len = identifier_string_length;
-  eat(T_IDENTIFIER, (char *)"identifier");
+  eat(T_STRUCT); // eat struct.
+  std::string struct_name = identifier_string;
+  eat(T_IDENTIFIER);
   eat('{');
-  char **key_names = alloc_arr<char *>(128);
-  Type **key_types = alloc_arr<Type *>(128);
-  size_t *key_name_lens = alloc_arr<size_t>(128);
-  unsigned int key_count = 0;
+  std::vector<std::pair<std::string, TypeAST *>> members;
   if (curr_token != '}')
     while (1) {
-      char *id = identifier_string;
-      size_t id_len = identifier_string_length;
-      eat(T_IDENTIFIER, (char *)"identifier");
-      if (curr_token == ':') {
-        key_names[key_count] = id;
-        key_name_lens[key_count] = id_len;
-        // value
-        eat(':');
-        key_types[key_count] = parse_type_unary();
-        key_count++;
-        if (curr_token == '}')
-          break;
-        eat(',');
-      }
+      std::string member_name = identifier_string;
+      eat(T_IDENTIFIER);
+      eat(':');
+      TypeAST *member_type = parse_type();
+      members.push_back(std::make_pair(member_name, member_type));
+      if (curr_token == '}')
+        break;
+      eat(',');
     }
   eat('}');
-  key_names = realloc_arr<char *>(key_names, key_count);
-  key_name_lens = realloc_arr<size_t>(key_name_lens, key_count);
-  key_types = realloc_arr<Type *>(key_types, key_count);
-  return new StructAST(struct_name, struct_name_len, key_names, key_name_lens,
-                       key_types, key_count);
+  return new StructAST(struct_name, members);
 }
 
 /// include ::= 'include' string_expr
-static char *parse_include() {
-  eat(T_INCLUDE, (char *)"include");
-  char *path = string_value;
+static std::string parse_include() {
+  eat(T_INCLUDE);
+  std::string path = string_value;
   if (curr_token != T_STRING) {
-    error("Error: Unexpected token after 'include': '%c' (%d), expected string",
-          curr_token, curr_token);
+    error("Error: Unexpected token after 'include': '" +
+          token_to_str(curr_token) + "', expected string");
   }
   return path;
 }

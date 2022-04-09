@@ -1,21 +1,22 @@
 include "c/stdio"
 include "types.fy"
 
-// eputc - takes a char and prints it to stderr
-fun eputc(ch: char)
-	fputc(ch, stderr)
 
-// eputs - takes a string and prints it to stderr (without newline)
-fun eputs(str: *char)
-	fputs(str, stderr)
+fun(char) print() putchar(this)
+fun(char[]) print() printf("%s", this)
+fun(int32) print() printf("%d", this)
+fun(int64) print() printf("%ld", this)
+fun(int128) print() printf("%lld", this)
+fun(uint32) print() printf("%u", this)
+fun(uint64) print() printf("%lu", this)
+fun(uint128) print() printf("%llu", this)
+fun(float64) print() printf("%f", this)
+fun(float32) print() (this as float64).print()
 
-// eputd - takes a double and prints it to stderr
-fun eputd(x: double)
-	fprintf(stderr, "%f", x)
-
-// eputn - takes a i32 and prints it to stderr
-fun eputn(i: int)
-	fprintf(stderr, "%d", i)
+fun printc(ch: char) 	ch.print()
+fun prints(str: char[])	str.print()
+fun printd(x: double)	x.print()
+fun printn(i: int)		i.print()
 
 include "string.fy"
 fun(*String) print_to(stream: *FILE)

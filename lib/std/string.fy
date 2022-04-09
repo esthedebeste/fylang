@@ -3,23 +3,23 @@ include "c/stdlib"
 include "types.fy"
 include "char.fy"
 
-fun(*char) length()
+fun(char[]) length()
 	strlen(this)
-fun(*char) clone()
+fun(char[]) clone()
 	strdup(this)
 
 struct String {
-	chars: *char,
+	chars: char[],
 	length: uint_ptrsize
 }
 
-fun alloc_chars(amount: uint_ptrsize): *char
+fun alloc_chars(amount: uint_ptrsize): char[]
 	calloc(amount, 1) // null-initialized
 
-fun realloc_chars(ptr: *char, new_size: uint_ptrsize): *char
+fun realloc_chars(ptr: char[], new_size: uint_ptrsize): char[]
 	realloc(ptr, new_size)
 
-fun create_string(chars: *char)
+fun create_string(chars: char[])
 	new String { chars = chars.clone(), length = chars.length() }
 
 fun(*String) concat(other: *String): *String {
@@ -50,13 +50,13 @@ fun(*String) filter(predicate: *fun(char): bool): *String {
 	new String { chars = realloc_chars(result, len), length = len }
 }
 
-fun(*String) uppercase(): *String 
+fun(*String) uppercase(): *String
 	this.transform(&toupper)
 
 fun(*String) lowercase(): *String
 	this.transform(&tolower)
 
-fun streql(a: *char, b: *char, len: uint_ptrsize): bool {
+fun streql(a: char[], b: char[], len: uint_ptrsize): bool {
 	for (let i = 0 as uint_ptrsize; i < len; i += 1)
 		if (a[i] != b[i])
 			return false

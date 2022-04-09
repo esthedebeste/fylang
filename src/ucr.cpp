@@ -1,17 +1,8 @@
 #include "utils.cpp"
-LLVMValueRef *used_globals = new LLVMValueRef[1];
-size_t used_globals_len = 0;
-void add_used_global(LLVMValueRef global) {
-  static size_t allocated = 1;
-  if (used_globals_len >= allocated) {
-    allocated *= 2;
-    used_globals = realloc_arr<LLVMValueRef>(used_globals, allocated);
-  }
-  used_globals[used_globals_len++] = global;
-}
+std::vector<LLVMValueRef> used_globals;
 bool is_global_used(LLVMValueRef global) {
-  for (size_t i = 0; i < used_globals_len; i++)
-    if (global == used_globals[i])
+  for (auto &used_global : used_globals)
+    if (used_global == global)
       return true;
   return false;
 }
@@ -19,7 +10,7 @@ bool is_global_used(LLVMValueRef global) {
 void mark_used_globals(LLVMValueRef entry) {
   if (is_global_used(entry))
     return;
-  add_used_global(entry);
+  used_globals.push_back(entry);
   if (LLVMIsAFunction(entry)) {
     LLVMBasicBlockRef block = LLVMGetFirstBasicBlock(entry);
     while (block != NULL) {
@@ -45,7 +36,7 @@ void loop_and_delete(LLVMModuleRef module,
   while (func != NULL) {
     LLVMValueRef nxt = next(func);
     if (!is_global_used(func)) {
-      debug_log("Removing %s\n", LLVMGetValueName(func));
+      debug_log("Removing " << LLVMGetValueName(func));
       remove(func);
     }
     func = nxt;
@@ -55,7 +46,7 @@ void loop_and_delete(LLVMModuleRef module,
 // unused code removal - removes all unused globals and functions from a certain
 // entry point (often `fun main`)
 void remove_unused_globals(LLVMModuleRef module, LLVMValueRef entryPoint) {
-  used_globals_len = 0;
+  used_globals.clear();
   mark_used_globals(entryPoint);
   loop_and_delete(module, LLVMGetFirstFunction, LLVMGetNextFunction,
                   LLVMDeleteFunction);

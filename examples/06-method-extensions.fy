@@ -6,7 +6,7 @@ fun(int) double()
 	this * 2
 
 fun main() {
-	eputs("4.double() => ")
-	eputn((4).double())
+	prints("4.double() => ")
+	printn((4).double())
 	0
 }
