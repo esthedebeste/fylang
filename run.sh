@@ -1,26 +1,28 @@
-dir=$(realpath --relative-to=. "$(dirname "$(readlink -f "$0")")")
-if [ "$1" = "-F" ]; then shift; else 
-  clang++ $dir/src/main.cpp -o $dir/bin/fylang -lLLVM-15 -fuse-ld=lld -std=c++17 || exit $?
-  echo "
- - Compiled fylang"
+subcmd="run"
+build_dir=$(realpath --relative-to=. "$(dirname "$(readlink -f "$0")")/build")
+cmake --build $build_dir --config Debug
+while getopts "duc" opt; do
+    case "$opt" in
+        d) export DEBUG=1;;
+        u) export NO_UCR=1;;
+        c) subcmd="com";;
+    esac
+done
+shift $((OPTIND-1))
+fy="$build_dir/fy"
+cmd="$fy $subcmd $@"
+QUIET=1 $cmd
+exit=$?
+if [ "$exit" -ne 0 ]; then
+    tput setaf 1
+    echo "[run.sh] Executed with exit code $exit"
+    if [ $DEBUG ]; then
+        lldb $cmd
+    fi
+    exit 1
 fi
-if [ "$1" = "-D" ]; then 
-  export DEBUG=1
-  shift
-fi
-if [ "$1" = "-Q" ]; then 
-  export QUIET=1
-  shift
-fi
-if [ "$1" = "-U" ]; then 
-  export NO_UCR=1
-  shift
-fi
-name=$1
-bin_name=${name##**/}
-bin_name=${bin_name%.fy}
-
-mkdir $dir/bin -p
-shift
-$dir/bin/fylang run $name $dir/bin/$bin_name.ll
-exit $?
+tput setaf 2
+echo "
+[run.sh] Executed with exit code 0"
+tput sgr0
+exit $exit

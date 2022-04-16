@@ -29,12 +29,32 @@ const char *next_unnamed() {
 // Unnamed symbol
 #define UN next_unnamed()
 
-inline _Noreturn void error(std::string err) {
-  std::cerr << "Error: " << err << std::endl;
-  exit(1);
-}
-#define STRINGIFY2(x) #x
-#define STRINGIFY(x) STRINGIFY2(x)
-#define debug_log(format...)                                                   \
+std::string token_to_str(int token);
+
+#define error(err) (std::cerr << "Error: " << err << std::endl), exit(1)
+#define debug_log(format)                                                      \
   if (DEBUG)                                                                   \
   std::cerr << "[" << __FILE__ << ":" << __LINE__ << "] " << format << std::endl
+
+#if defined(_WIN32)
+#include <Windows.h>
+#include <wchar.h>
+std::filesystem::path get_executable_path() {
+  wchar_t buffer[4096];
+  GetModuleFileNameW(NULL, buffer, sizeof(buffer));
+  return std::filesystem::path(buffer).parent_path();
+}
+#elif defined(__linux__)
+#include <unistd.h>
+std::filesystem::path get_executable_path() {
+  char buffer[4096];
+  ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer));
+  if (len == -1)
+    return "";
+  return std::filesystem::path(std::string(buffer, len)).parent_path();
+}
+#else
+std::filesystem::path get_executable_path() {
+  static_assert(false, "Unsupported platform (expected _WIN32 or __linux__)");
+}
+#endif

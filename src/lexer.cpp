@@ -12,7 +12,7 @@ static char num_type; // Type of number. 'd' => double, 'f' => float, 'i' =>
                       // int32, 'u' => uint32, 'b' => byte/char/uint8
 static std::string string_value; // "[^"]*" - Filled in if T_STRING
 
-static std::string token_to_str(const int token) {
+std::string token_to_str(const int token) {
   switch (token) {
   case T_IDENTIFIER:
     return identifier_string + " (identifier)";

@@ -70,7 +70,7 @@ CharReader *get_file(std::string base_path, std::string relative_path) {
 static void add_file_to_queue(std::string base_path,
                               std::string relative_path) {
   CharReader *file = get_file(base_path, relative_path);
-  std::string path = realpath(file->file_path.c_str(), NULL);
+  std::string path = std::filesystem::absolute(file->file_path).string();
   for (auto &visited_path : visited_paths)
     if (visited_path == path)
       return; // only include a file once

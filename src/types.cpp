@@ -31,6 +31,7 @@ public:
   virtual TypeType type_type() = 0;
   virtual bool eq(Type *other) = 0;
   virtual bool neq(Type *other) { return !eq(other); }
+  virtual bool castable_to(Type *other) { return eq(other); }
   virtual std::string stringify() { error("stringify not implemented yet"); }
   bool operator==(Type *other) { return eq(other); }
   bool operator!=(Type *other) { return neq(other); }
@@ -38,7 +39,7 @@ public:
   virtual size_t _hash() = 0;
 };
 template <> struct std::hash<Type *> {
-  std::size_t operator()(Type *const &s) const noexcept { return s->_hash(); }
+  size_t operator()(Type *const &s) const noexcept { return s->_hash(); }
 };
 template <typename T> inline size_t hash(T t) { return std::hash<T>()(t); }
 template <> struct std::hash<std::vector<Type *>> {
@@ -56,6 +57,7 @@ public:
   LLVMTypeRef llvm_type() { return void_type; }
   TypeType type_type() { return TypeType::Void; }
   bool eq(Type *other) { return other->type_type() == TypeType::Void; }
+  bool castable_to(Type *other) { return eq(other); }
   std::string stringify() { return "void"; }
   size_t _hash() { return hash(TypeType::Void); }
 };
@@ -106,6 +108,10 @@ public:
              other_n->is_signed == is_signed;
     return false;
   }
+  bool castable_to(Type *other) {
+    return other->type_type() == TypeType::Number ||
+           other->type_type() == TypeType::Pointer;
+  }
   std::string stringify() {
     std::string typ = is_floating ? "float" : is_signed ? "int" : "uint";
     return typ + std::to_string(bits);
@@ -131,7 +137,15 @@ public:
       return other_n->points_to->eq(this->points_to);
     return false;
   }
-
+  bool castable_to(Type *other) {
+    if (other->type_type() == TypeType::Pointer ||
+        other->type_type() == TypeType::Number)
+      return true;
+    else if (other->type_type() == TypeType::Function)
+      return this->points_to->eq(other);
+    else
+      return false;
+  }
   std::string stringify() { return "*" + points_to->stringify(); }
   size_t _hash() { return hash(points_to) ^ hash(TypeType::Pointer); }
 };
@@ -150,7 +164,14 @@ public:
       return other_arr->elem->eq(this->elem) && other_arr->count == this->count;
     return false;
   }
-
+  bool castable_to(Type *other) {
+    if (other->type_type() == TypeType::Array) {
+      ArrayType *other_arr = dynamic_cast<ArrayType *>(other);
+      return other_arr->elem->eq(this->elem) && other_arr->count >= this->count;
+    } else if (PointerType *other_ptr = dynamic_cast<PointerType *>(other))
+      return other_ptr->points_to->eq(this->elem);
+    return false;
+  }
   std::string stringify() {
     return elem->stringify() + "[" + std::to_string(count) + "]";
   }
@@ -186,6 +207,21 @@ public:
     }
     return false;
   }
+  bool castable_to(Type *other) {
+    if (other->type_type() == TypeType::Tuple) {
+      TupleType *other_tuple = dynamic_cast<TupleType *>(other);
+      if (other_tuple->types.size() == 0)
+        return true;
+      if (other_tuple->types.size() != types.size())
+        return false;
+      for (size_t i = 0; i < types.size(); i++) {
+        if (!other_tuple->types[i]->castable_to(types[i]))
+          return false;
+      }
+      return true;
+    }
+    return false;
+  }
   std::string stringify() {
     std::stringstream res;
     res << "{ ";
@@ -207,25 +243,26 @@ public:
   std::vector<std::pair<std::string, Type *>> fields;
   StructType(std::string name,
              std::vector<std::pair<std::string, Type *>> fields)
-      : name(name), fields(fields), TupleType(seconds(fields)) {
-    LLVMTypeRef *llvm_types = new LLVMTypeRef[fields.size()];
-    for (size_t i = 0; i < fields.size(); i++)
-      llvm_types[i] = types[i]->llvm_type();
-    llvm_struct_type = LLVMStructCreateNamed(curr_ctx, name.c_str());
-    LLVMStructSetBody(llvm_struct_type, llvm_types, fields.size(), true);
-  }
+      : name(name), fields(fields), TupleType(seconds(fields)) {}
   size_t get_index(std::string name) {
     for (size_t i = 0; i < fields.size(); i++)
       if (fields[i].first == name)
         return i;
     error("Struct does not have key " + name);
   }
-  LLVMTypeRef llvm_type() { return llvm_struct_type; }
   TypeType type_type() { return TypeType::Struct; }
   bool eq(Type *other) {
+    if (TupleType::eq(other))
+      return true;
     if (StructType *other_s = dynamic_cast<StructType *>(other))
       // structs are unique
       return this == other_s;
+    return false;
+  }
+  bool castable_to(Type *other) {
+    if (StructType *other_s = dynamic_cast<StructType *>(other))
+      if (other_s->name != this->name)
+        return false;
     return false;
   }
   std::string stringify() { return name; }
@@ -259,11 +296,12 @@ public:
     if (!other_f || other_f->arguments.size() != arguments.size() ||
         other_f->vararg != vararg || other_f->return_type->neq(return_type))
       return false;
-    for (unsigned int i = 0; i < arguments.size(); i++)
+    for (size_t i = 0; i < arguments.size(); i++)
       if (other_f->arguments[i]->neq(arguments[i]))
         return false;
     return true;
   };
+  bool castable_to(Type *other) { return eq(other); };
   std::string stringify() {
     std::stringstream res;
     res << "fun(";
@@ -277,5 +315,13 @@ public:
   }
   size_t _hash() {
     return hash(arguments) ^ hash(arguments.size()) ^ hash(TypeType::Function);
+  }
+};
+template <> struct std::hash<FunctionType *> {
+  size_t operator()(FunctionType *t) const noexcept { return t->_hash(); }
+};
+template <> struct std::equal_to<FunctionType *> {
+  size_t operator()(FunctionType *a, FunctionType *b) const noexcept {
+    return a->eq(b);
   }
 };

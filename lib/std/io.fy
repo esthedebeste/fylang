@@ -18,6 +18,8 @@ fun prints(str: char[])	str.print()
 fun printd(x: double)	x.print()
 fun printn(i: int)		i.print()
 
+fun print(x: generic X) x.print()
+
 include "string.fy"
 fun(*String) print_to(stream: *FILE)
 	fwrite(this.chars, 1, this.length, stream)

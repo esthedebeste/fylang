@@ -10,34 +10,57 @@ public:
   virtual Value *gen_value() = 0;
 };
 
-class ValueAndType : public ExprAST {
-public:
-  Value *value;
-  Type *type;
-  ValueAndType(Type *type) : type(type) {}
-  Type *get_type() { return type; };
-  Value *gen_value() { return value; };
-};
-
-static std::unordered_map<std::string, ValueAndType *> curr_named_variables;
-#define type_string std::pair<Type *, std::string>
-template <typename A, typename B> struct std::hash<std::pair<A, B>> {
-  size_t operator()(const std::pair<A, B> type) const {
-    return std::hash<A>()(type.first) ^ std::hash<B>()(type.second);
+struct Scope {
+  std::unordered_map<std::string, Value *> named_variables;
+  Scope *parent_scope = nullptr;
+  Scope(Scope *parent_scope) : parent_scope(parent_scope) {}
+  Value *get_named_variable(std::string name) {
+    if (named_variables.count(name))
+      return named_variables[name];
+    if (parent_scope)
+      return parent_scope->get_named_variable(name);
+    return nullptr;
+  }
+  void declare_variable(std::string name, Type *type) {
+    named_variables[name] = new ConstValue(type, nullptr);
+  }
+  void set_variable(std::string name, Value *value) {
+    named_variables[name] = value;
   }
 };
-template <> struct std::equal_to<type_string> {
-  bool operator()(const type_string &p1, const type_string &p2) const {
-    return p1.first->eq(p2.first) && p1.second == p2.second;
-  }
-};
+Scope *curr_scope = new Scope(nullptr); // global scope
+Scope *push_scope() { return curr_scope = new Scope(curr_scope); }
+Scope *pop_scope() { return curr_scope = curr_scope->parent_scope; }
 
-static std::unordered_map<type_string, ValueAndType *> curr_extension_methods;
-#undef type_string
+class TypeAST;
 static FunctionType *curr_func_type;
 
 #include "functions.cpp"
 #include "types.cpp"
+
+NumType *sizeof_type;
+/// SizeofExprAST - Expression class to get the byte size of a type
+class SizeofExprAST : public ExprAST {
+public:
+  TypeAST *type;
+  SizeofExprAST(TypeAST *type) : type(type) {
+    if (!sizeof_type)
+      sizeof_type = new NumType(false); // uint_ptrsize
+  }
+  Type *get_type() { return sizeof_type; }
+  Value *gen_value() {
+    return new ConstValue(sizeof_type, LLVMSizeOf(type->llvm_type()));
+  }
+};
+inline Value *build_malloc(Type *type) {
+  if (!curr_named_functions.count("malloc"))
+    error("malloc not defined before using 'new', maybe add 'include "
+          "\"c/stdlib\"'?");
+  return new NamedValue(curr_named_functions["malloc"]
+                            ->gen_call({new SizeofExprAST(type_ast(type))})
+                            ->cast_to(type->ptr()),
+                        "malloc_" + type->stringify());
+}
 
 NumType *num_char_to_type(char type_char, bool has_dot) {
   switch (type_char) {
@@ -69,9 +92,9 @@ NumType *num_char_to_type(char type_char, bool has_dot) {
 class NumberExprAST : public ExprAST {
   std::string val;
   unsigned int base;
-  NumType *type;
 
 public:
+  NumType *type;
   NumberExprAST(std::string val, char type_char, bool has_dot,
                 unsigned int base)
       : val(val), base(base) {
@@ -127,35 +150,38 @@ public:
 
 /// VariableExprAST - Expression class for referencing a variable, like "a".
 class VariableExprAST : public ExprAST {
-  ValueAndType *vt;
 
 public:
   std::string name;
   VariableExprAST(std::string name) : name(name) {}
-  ValueAndType *get_vt() {
-    vt = curr_named_variables[name];
-    if (!vt)
+  Type *get_type() {
+    if (auto var = curr_scope->get_named_variable(name))
+      return var->get_type();
+    else if (curr_named_functions.count(name))
+      return curr_named_functions[name]->get_type();
+    else
       error("Variable '" + name + "' doesn't exist.");
-    return vt;
   }
-  Type *get_type() { return get_vt()->type; }
-  Value *gen_value() { return get_vt()->value; }
+  Value *gen_value() {
+    if (auto var = curr_scope->get_named_variable(name))
+      return var;
+    else if (curr_named_functions.count(name))
+      return curr_named_functions[name]->gen_ptr();
+    else
+      error("Variable '" + name + "' doesn't exist.");
+  }
 };
 
 /// LetExprAST - Expression class for creating a variable, like "let a = 3".
-class LetExprAST : public ExprAST, public TopLevelAST {
-  bool defined = false;
+class LetExprAST : public ExprAST {
   void init() {
-    if (defined)
-      return;
-    if (type) {
-      curr_named_variables[id] = new ValueAndType(type->type());
-    } else if (value != nullptr) {
-      type = type_ast(value->get_type());
-      curr_named_variables[id] = new ValueAndType(type->type());
-    } else
-      error("Untyped valueless variable " + id);
-    defined = true;
+    if (!type) {
+      if (value)
+        type = type_ast(value->get_type());
+      else
+        error("Untyped valueless variable " + id);
+    }
+    curr_scope->declare_variable(id, type->type());
   }
 
 public:
@@ -182,16 +208,17 @@ public:
     }
     if (constant)
       LLVMSetGlobalConstant(ptr, true);
-    curr_named_variables[id]->value = new BasicLoadValue(ptr, type->type());
+    curr_scope->set_variable(id, new BasicLoadValue(ptr, type->type()));
     return ptr;
   }
   Value *gen_value() {
     init();
     if (constant) {
-      if (value)
-        return curr_named_variables[id]->value =
-                   new NamedValue(value->gen_value(), id);
-      else
+      if (value) {
+        NamedValue *val = new NamedValue(value->gen_value(), id);
+        curr_scope->set_variable(id, val);
+        return val;
+      } else
         error("Constant variables need an initialization value");
     }
     LLVMValueRef ptr =
@@ -202,31 +229,16 @@ public:
           value->gen_value()->cast_to(type->type())->gen_val();
       LLVMBuildStore(curr_builder, llvm_val, ptr);
     }
-    return curr_named_variables[id]->value =
-               new BasicLoadValue(ptr, type->type());
+    BasicLoadValue *val = new BasicLoadValue(ptr, type->type());
+    curr_scope->set_variable(id, val);
+    return val;
   }
   LLVMValueRef gen_declare() {
     init();
     LLVMValueRef global =
         LLVMAddGlobal(curr_module, type->llvm_type(), id.c_str());
-    curr_named_variables[id]->value = new BasicLoadValue(global, type->type());
+    curr_scope->set_variable(id, new BasicLoadValue(global, type->type()));
     return global;
-  }
-};
-
-NumType *sizeof_type;
-/// SizeofExprAST - Expression class to get the byte size of a type
-class SizeofExprAST : public ExprAST {
-
-public:
-  TypeAST *type;
-  SizeofExprAST(TypeAST *type) : type(type) {
-    if (!sizeof_type)
-      sizeof_type = new NumType(false); // uint_ptrsize
-  }
-  Type *get_type() { return sizeof_type; }
-  Value *gen_value() {
-    return new ConstValue(sizeof_type, LLVMSizeOf(type->llvm_type()));
   }
 };
 
@@ -280,9 +292,9 @@ public:
 LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
                                NumType *lhs_nt, NumType *rhs_nt) {
   if (lhs_nt->bits > rhs_nt->bits)
-    R = cast(R, rhs_nt, lhs_nt);
+    R = gen_num_cast(R, rhs_nt, lhs_nt);
   else if (rhs_nt->bits > lhs_nt->bits)
-    L = cast(L, lhs_nt, rhs_nt);
+    L = gen_num_cast(L, lhs_nt, rhs_nt);
   bool floating = lhs_nt->is_floating && rhs_nt->is_floating;
   if (floating)
     switch (op) {
@@ -378,6 +390,17 @@ LLVMValueRef gen_ptr_num_binop(int op, LLVMValueRef ptr, LLVMValueRef num,
     error("invalid ptr_num binary operator '" + token_to_str(op) + "'");
   }
 }
+LLVMValueRef gen_ptr_ptr_binop(int op, LLVMValueRef L, LLVMValueRef R,
+                               PointerType *lhs_ptr, PointerType *rhs_pt) {
+  switch (op) {
+  case T_EQEQ:
+    return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntEQ, L, R, UN);
+  case T_NEQ:
+    return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntNE, L, R, UN);
+  default:
+    error("invalid ptr_ptr binary operator '" + token_to_str(op) + "'");
+  }
+}
 
 /// BinaryExprAST - Expression class for a binary operator.
 class BinaryExprAST : public ExprAST {
@@ -405,12 +428,11 @@ public:
     TypeType rhs_tt = rhs_t->type_type();
 
     if (op == '=')
-      return rhs_t;
+      return lhs_t;
+    else if (binop_precedence[op] == comparison_prec)
+      return BoolExprAST(true).get_type();
     else if (lhs_tt == TypeType::Number && rhs_tt == TypeType::Number)
-      return (binop_precedence[op] ==
-              comparison_prec /* binop is a comparison */)
-                 ? new NumType(1, false, false) // int < int returns bool
-                 : lhs_t;                       // int + int returns int
+      return lhs_t; // int + int returns int
     else if (lhs_tt == TypeType::Pointer &&
              rhs_tt == TypeType::Number) // ptr + int returns offsetted ptr
       return /* ptr */ lhs_t;
@@ -418,7 +440,7 @@ public:
              rhs_tt == TypeType::Pointer) // int + ptr returns offsetted ptr
       return /* ptr */ rhs_t;
     else
-      error("Unknown ptr_ptr op");
+      error("Unknown op " + token_to_str(op));
   }
 
   Value *gen_assign() {
@@ -445,29 +467,31 @@ public:
       return new ConstValue(type, gen_ptr_num_binop(op, R, L, rhs_pt, lhs_nt));
     else if (lhs_pt && rhs_nt)
       return new ConstValue(type, gen_ptr_num_binop(op, L, R, lhs_pt, rhs_nt));
-    error("Unknown ptr_ptr op");
+    else if (lhs_pt && rhs_pt)
+      return new ConstValue(type, gen_ptr_ptr_binop(op, L, R, lhs_pt, rhs_pt));
+    error("Unknown op " + token_to_str(op));
   }
 };
 /// UnaryExprAST - Expression class for a unary operator.
 class UnaryExprAST : public ExprAST {
   int op;
   ExprAST *operand;
-  Type *type;
 
 public:
-  UnaryExprAST(int op, ExprAST *operand) : op(op), operand(operand) {
+  UnaryExprAST(int op, ExprAST *operand) : op(op), operand(operand) {}
+  Type *get_type() {
     if (op == '*')
       if (PointerType *opt = dynamic_cast<PointerType *>(operand->get_type()))
-        type = opt->get_points_to();
+        return opt->get_points_to();
       else
         error("* can't be used on a non-pointer type");
     else if (op == '&')
-      type = operand->get_type()->ptr();
+      return operand->get_type()->ptr();
     else
-      type = operand->get_type();
+      return operand->get_type();
   }
-  Type *get_type() { return type; }
   Value *gen_value() {
+    Type *type = get_type();
     auto zero =
         LLVMConstInt((new NumType(32, false, false))->llvm_type(), 0, false);
     Value *val = operand->gen_value();
@@ -495,18 +519,22 @@ public:
       return new BasicLoadValue(val->gen_val(), type);
     case '&':
       return new ConstValue(type, val->gen_ptr());
-    case T_RETURN:
+    case T_RETURN: {
       LLVMBuildRet(curr_builder,
                    val->cast_to(curr_func_type->return_type)->gen_val());
+      auto block = LLVMAppendBasicBlock(
+          LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder)), UN);
+      LLVMPositionBuilderAtEnd(curr_builder, block);
       return val;
+    }
     default:
       error("invalid prefix unary operator '" + token_to_str(op) + "'");
     }
   }
 };
 
-/// CallExprAST - Expression class for function calls.
-class CallExprAST : public ExprAST {
+/// ValueCallExprAST - For calling a value (often a function pointer)
+class ValueCallExprAST : public ExprAST {
   ExprAST *called;
   std::vector<ExprAST *> args;
   bool is_ptr;
@@ -522,7 +550,7 @@ class CallExprAST : public ExprAST {
   }
 
 public:
-  CallExprAST(ExprAST *called, std::vector<ExprAST *> args)
+  ValueCallExprAST(ExprAST *called, std::vector<ExprAST *> args)
       : called(called), args(args) {}
 
   Type *get_type() {
@@ -552,6 +580,26 @@ public:
     return new ConstValue(func_t->return_type,
                           LLVMBuildCall2(curr_builder, func_t->llvm_type(),
                                          func, arg_vs, args.size(), UN));
+  }
+};
+
+class NameCallExprAST : public ExprAST {
+public:
+  std::string name;
+  std::vector<ExprAST *> args;
+  NameCallExprAST(std::string name, std::vector<ExprAST *> args)
+      : name(name), args(args) {}
+  Type *get_type() {
+    if (curr_named_functions.count(name))
+      return curr_named_functions[name]->get_type(args)->return_type;
+    else
+      return ValueCallExprAST(new VariableExprAST(name), args).get_type();
+  }
+  Value *gen_value() {
+    if (curr_named_functions.count(name))
+      return curr_named_functions[name]->gen_call(args);
+    else
+      return ValueCallExprAST(new VariableExprAST(name), args).gen_value();
   }
 };
 
@@ -674,25 +722,19 @@ public:
   }
 };
 
+struct ExtAndPtr {
+  MethodAST *extension;
+  bool is_ptr;
+};
 /// MethodCallExprAST - Expression class for calling methods (a.len()).
 class MethodCallExprAST : public ExprAST {
-  CallExprAST *underlying_call = nullptr;
-  CallExprAST *get_call() {
-    if (underlying_call)
-      return underlying_call;
-    ValueAndType *extension =
-        curr_extension_methods[{source->get_type(), name}];
-    bool ptr = !extension;
-    if (ptr)
-      extension = curr_extension_methods[{source->get_type()->ptr(), name}];
-    if (extension) {
-      args.push_back(ptr ? new UnaryExprAST('&', source) : source);
-      return underlying_call = new CallExprAST(extension, args);
-    } else {
-      // call stored pointer to function
-      auto prop = new PropAccessExprAST(name, source);
-      return underlying_call = new CallExprAST(prop, args);
-    }
+  ExtAndPtr get_extension() {
+    auto extension = get_method(source->get_type(), name);
+    if (!extension)
+      return {get_method(source->get_type()->ptr(), name), true};
+    else
+      return {extension, false};
+    return {nullptr, false};
   }
 
 public:
@@ -703,8 +745,25 @@ public:
                     std::vector<ExprAST *> args)
       : name(name), source(source), args(args) {}
 
-  Type *get_type() { return get_call()->get_type(); }
-  Value *gen_value() { return get_call()->gen_value(); }
+  Type *get_type() {
+    auto ext = get_extension();
+    if (ext.extension != nullptr)
+      return ext.extension
+          ->get_type(args, ext.is_ptr ? new UnaryExprAST('&', source) : source)
+          ->return_type;
+    else
+      return ValueCallExprAST(new PropAccessExprAST(name, source), args)
+          .get_type();
+  }
+  Value *gen_value() {
+    auto ext = get_extension();
+    if (ext.extension != nullptr)
+      return ext.extension->gen_call(
+          args, ext.is_ptr ? new UnaryExprAST('&', source) : source);
+    else
+      return ValueCallExprAST(new PropAccessExprAST(name, source), args)
+          .gen_value();
+  }
 };
 
 /// NewExprAST - Expression class for creating an instance of a struct (new
@@ -724,7 +783,7 @@ public:
     if (!st)
       error("Cannot create instance of non-struct type " +
             s_type->type()->stringify());
-    LLVMValueRef ptr = LLVMBuildMalloc(curr_builder, st->llvm_type(), "malloc");
+    LLVMValueRef ptr = build_malloc(st)->gen_val();
     for (size_t i = 0; i < fields.size(); i++) {
       auto &[key, value] = fields[i];
       LLVMValueRef set_ptr = LLVMBuildStructGEP2(
@@ -762,8 +821,10 @@ public:
 
   Value *gen_value() {
     Type *type = get_type();
-    LLVMValueRef ptr = (is_new ? LLVMBuildMalloc : LLVMBuildAlloca)(
-        curr_builder, t_type->llvm_type(), is_new ? "malloc" : "alloca");
+    LLVMValueRef ptr = is_new
+                           ? build_malloc(t_type)->gen_val()
+                           : LLVMBuildAlloca(curr_builder, t_type->llvm_type(),
+                                             is_new ? "malloc" : "alloca");
     for (size_t i = 0; i < values.size(); i++) {
       LLVMValueRef set_ptr = LLVMBuildStructGEP2(
           curr_builder, t_type->llvm_type(), ptr, i, "tupleset");
@@ -785,16 +846,22 @@ public:
       error("block can't be empty.");
   }
   Type *get_type() {
+    push_scope();
     // initialize previous exprs
     for (size_t i = 0; i < exprs.size() - 1; i++)
       exprs[i]->get_type();
-    return exprs.back()->get_type();
+    Type *type = exprs.back()->get_type();
+    pop_scope();
+    return type;
   }
   Value *gen_value() {
+    push_scope();
     // generate code for all exprs and only return last expr
     for (size_t i = 0; i < exprs.size() - 1; i++)
       exprs[i]->gen_value();
-    return exprs.back()->gen_value();
+    Value *value = exprs.back()->gen_value();
+    pop_scope();
+    return value;
   }
 };
 
@@ -837,12 +904,7 @@ public:
 
 /// TypeIfExprAST - Expression class for ifs based on type.
 class TypeIfExprAST : public ExprAST {
-  ExprAST *ret_expr = nullptr;
-  ExprAST *pick() {
-    if (ret_expr)
-      return ret_expr;
-    return ret_expr = a->type()->eq(b->type()) ? then : elze;
-  }
+  ExprAST *pick() { return b->match(a->type()) ? then : elze; }
 
 public:
   ExprAST *then, *elze;
@@ -860,11 +922,12 @@ public:
 class IfExprAST : public ExprAST {
 public:
   ExprAST *cond, *then, *elze;
+  bool null_else;
   Type *type;
   void init() {
     Type *then_t = then->get_type();
     type = then_t;
-    if (elze == nullptr)
+    if (null_else)
       elze = new NullExprAST(type);
     Type *else_t = elze->get_type();
     if (then_t->neq(else_t))
@@ -875,7 +938,7 @@ public:
   IfExprAST(ExprAST *cond, ExprAST *then,
             // elze because else cant be a variable name lol
             ExprAST *elze)
-      : cond(cond), then(then), elze(elze) {}
+      : cond(cond), then(then), elze(elze), null_else(elze == nullptr) {}
 
   Type *get_type() {
     init();
@@ -1008,50 +1071,48 @@ public:
   }
 };
 
-class StructAST : public TopLevelAST {
-  StructTypeAST type;
-
+class TypeDefAST {
 public:
-  StructAST(std::string name,
-            std::vector<std::pair<std::string, TypeAST *>> members)
-      : type(name, members) {}
-  LLVMValueRef gen_toplevel() {
-    curr_named_types[type.name] = type.type();
-    return nullptr;
-  }
+  virtual ~TypeDefAST() {}
+  virtual void gen_toplevel() = 0;
 };
 
-class TypeDefAST : public TopLevelAST {
+class AbsoluteTypeDefAST : public TypeDefAST {
   std::string name;
   TypeAST *type;
 
 public:
-  TypeDefAST(std::string name, TypeAST *type) : name(name), type(type) {}
-  LLVMValueRef gen_toplevel() {
-    curr_named_types[name] = type->type();
-    return nullptr;
-  }
+  AbsoluteTypeDefAST(std::string name, TypeAST *type)
+      : name(name), type(type) {}
+  void gen_toplevel() { curr_named_types[name] = type->type(); }
 };
 
-/// DeclareExprAST - Expression class for defining an declare.
-class DeclareExprAST : public TopLevelAST {
+class GenericTypeDefAST : public TypeDefAST {
+public:
+  std::string name;
+  std::vector<std::string> params;
+  TypeAST *type;
+  GenericTypeDefAST(std::string name, std::vector<std::string> params,
+                    TypeAST *type)
+      : name(name), params(params), type(type) {}
+  void gen_toplevel() { curr_named_generics[name] = new Generic(params, type); }
+};
+
+/// DeclareExprAST - Expression class for defining a declare.
+class DeclareExprAST {
   LetExprAST *let = nullptr;
-  PrototypeAST *prot = nullptr;
-  Type *type;
+  FunctionAST *func = nullptr;
 
 public:
   DeclareExprAST(LetExprAST *let) : let(let) {
-    type = let->get_type();
-    curr_named_variables[let->id] = new ValueAndType(type);
+    curr_scope->declare_variable(let->id, let->get_type());
   }
-  DeclareExprAST(PrototypeAST *prot) : prot(prot) {
-    type = prot->get_type();
-    curr_named_variables[prot->name] = new ValueAndType(type);
+  DeclareExprAST(FunctionAST *func) : func(func) {
+    curr_named_functions[func->name] = func;
   }
   LLVMValueRef gen_toplevel() {
     if (let)
       return let->gen_declare();
-    else
-      return prot->codegen();
+    return nullptr;
   }
 };

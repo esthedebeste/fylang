@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 #include <math.h>
+#include <set>
 #include <sstream>
 #include <stdlib.h>
 #include <string.h>
@@ -10,10 +11,10 @@
 #include <unordered_map>
 #include <vector>
 extern "C" {
-#include "llvm-c-15/llvm-c/BitWriter.h"
-#include "llvm-c-15/llvm-c/Core.h"
-#include "llvm-c-15/llvm-c/ExecutionEngine.h"
-#include "llvm-c-15/llvm-c/TargetMachine.h"
+#include "llvm-c-14/llvm-c/BitWriter.h"
+#include "llvm-c-14/llvm-c/Core.h"
+#include "llvm-c-14/llvm-c/ExecutionEngine.h"
+#include "llvm-c-14/llvm-c/TargetMachine.h"
 }
 bool DEBUG = false;
 std::string std_dir;
@@ -60,6 +61,7 @@ enum Token : const int {
   T_OREQ,          // |=
   T_DUMP,          // DUMP
   T_ASSERT_TYPE,   // ASSERT_TYPE
+  T_GENERIC,       // generic
 };
 
 static LLVMContextRef curr_ctx;
@@ -130,6 +132,7 @@ static std::unordered_map<Token, std::string> token_strs = {
     {T_OREQ, "|="},
     {T_DUMP, "DUMP"},
     {T_ASSERT_TYPE, "ASSERT_TYPE"},
+    {T_GENERIC, "generic"},
 };
 static std::unordered_map<std::string, Token> keywords = {
     {"if", T_IF},
@@ -155,4 +158,8 @@ static std::unordered_map<std::string, Token> keywords = {
     {"for", T_FOR},
     {"DUMP", T_DUMP},
     {"ASSERT_TYPE", T_ASSERT_TYPE},
+    {"generic", T_GENERIC},
 };
+
+static std::set<int> unaries = {'!', '*', '&', '+', '-', T_RETURN};
+static std::set<int> type_unaries = {'*', '&', T_UNSIGNED, T_SIGNED, T_GENERIC};

@@ -1,36 +1,34 @@
 include "std/io"
 include "std/array"
 
-type i = *{ int }
-fun uneven(x: i, i: uint_ptrsize): bool
-	x.0 % 2 == 1
+fun uneven(x: int, i: uint_ptrsize): bool
+	x % 2 == 1
 
-fun double(x: i, i: uint_ptrsize): i
-	new (x.0 * 2,)
-
-fun(*Array) ati(i: int_ptrsize): int
-	(this.at(i) as i).0
+fun double(x: int, i: uint_ptrsize): int
+	x * 2
 
 fun main() {
-	const arr = create_array()
-	arr.push(new (2, ))
-	arr.push(new (3, ))
-	arr.push(new (1, ))
-	prints("arr: ")
-	prints("\n - length: "); printn(arr.length);
-	prints("\n - at(-1): "); printn(arr.ati(-1))
-	prints("\n - at( 0): "); printn(arr.ati(0))
-	prints("\n - at( 1): "); printn(arr.ati(1))
+	let arr: Array<int>
+	arr.init()
+	arr.push(2)
+	arr.push(3)
+	arr.push(1)
+	print("arr: ")
+	print("\n - length: "); print(arr.length);
+	print("\n - at(-1): "); print(arr.at(-1))
+	print("\n - at( 0): "); print(arr.at(0))
+	print("\n - at( 1): "); print(arr.at(1))
+	print("\n - at( 5): "); print(arr.at(5))
 	const filtered = arr.filter(uneven)
-	prints("\nfiltered: ")
-	prints("\n - length: "); printn(filtered.length)
-	prints("\n -  at(0): "); printn(filtered.ati(0))
-	prints("\n -  at(1): "); printn(filtered.ati(1))
+	print("\nfiltered: ")
+	print("\n - length: "); print(filtered.length)
+	print("\n -  at(0): "); print(filtered.at(0))
+	print("\n -  at(1): "); print(filtered.at(1))
 	const doubled = arr.map(double)
-	prints("\ndoubled: ")
-	prints("\n - length: "); printn(doubled.length)
-	prints("\n - at(-1): "); printn(doubled.ati(-1))
-	prints("\n - at( 0): "); printn(doubled.ati(0))
-	prints("\n - at( 1): "); printn(doubled.ati(1))
+	print("\ndoubled: ")
+	print("\n - length: "); print(doubled.length)
+	print("\n - at(-1): "); print(doubled.at(-1))
+	print("\n - at( 0): "); print(doubled.at(0))
+	print("\n - at( 1): "); print(doubled.at(1))
 	0
 }

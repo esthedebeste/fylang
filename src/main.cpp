@@ -3,18 +3,15 @@
 #include "utils.cpp"
 static void handle_definition() {
   auto ast = parse_definition();
-  debug_log("Parsed a function definition (name: " << ast->proto->name
-                                                   << ").\n");
-  auto val = ast->gen_toplevel();
-  if (DEBUG)
-    LLVMDumpValue(val);
+  debug_log("Parsed a function definition (name: " << ast->name << ")");
+  ast->add();
 }
 
 static void handle_declare() {
   auto ast = parse_declare();
   debug_log("Parsed a declare\n");
   auto val = ast->gen_toplevel();
-  if (DEBUG)
+  if (DEBUG && val)
     LLVMDumpValue(val);
 }
 static void handle_global_let() {
@@ -76,7 +73,7 @@ static void main_loop() {
   }
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv, char **envp) {
   if (argc < 2) {
     printf("Usage: %s [run|com] <filename> (output)\n", argv[0]);
     return 1;
@@ -96,7 +93,7 @@ int main(int argc, char **argv) {
   if (getenv("DEBUG"))
     DEBUG = true;
   bool QUIET = getenv("QUIET");
-  std_dir = dirname(argv[0]) + "/../lib";
+  std_dir = get_executable_path().append("../lib").string();
   // host machine triple
   char *target_triple = LLVMGetDefaultTargetTriple();
   LLVMTargetRef target;
@@ -122,9 +119,12 @@ int main(int argc, char **argv) {
   add_file_to_queue(".", input);
   // parse and compile everything into LLVM IR
   main_loop();
-  if (!getenv("NO_UCR"))
-    remove_unused_globals(curr_module,
-                          LLVMGetNamedFunction(curr_module, "main"));
+  LLVMValueRef main_function =
+      curr_named_functions.count("main")
+          ? curr_named_functions["main"]->gen_ptr()->gen_val()
+          : nullptr;
+  if (!getenv("NO_UCR") && main_function)
+    remove_unused_globals(curr_module, main_function);
   if (mode == COMPILE) {
     std::string out = argv[3];
     size_t ext_pos = out.rfind('.');
@@ -150,22 +150,31 @@ int main(int argc, char **argv) {
     if (err)
       error(err);
     if (!QUIET)
-      std::cout << "\n  Successfully compiled " << input << " to " << out
-                << std::endl;
+      std::cout << "\n\033[32m[fy] Successfully compiled " << input << " to "
+                << out << "\n\033[0m" << std::endl;
     return 0;
   } else if (mode == RUN) {
+    if (!main_function)
+      error("No main function found, cannot run");
     LLVMInitializeNativeAsmPrinter();
     LLVMInitializeNativeAsmParser();
+    LLVMLinkInMCJIT();
     LLVMExecutionEngineRef engine;
     char *err;
     bool errored =
         LLVMCreateJITCompilerForModule(&engine, curr_module, 0, &err);
     if (errored)
       error(std::string("JIT Failed: ") + err);
-    int exit_code = LLVMRunFunctionAsMain(
-        engine, LLVMGetNamedFunction(curr_module, "main"), 0, NULL, NULL);
+    int nargc = argc - 2;
+    char **nargv = new char *[nargc];
+    nargv[0] = input;
+    for (int i = 1; i < nargc; i++)
+      nargv[i] = strdup(argv[i + 2]);
+    int exit_code =
+        LLVMRunFunctionAsMain(engine, main_function, nargc, nargv, envp);
     if (!QUIET)
-      std::cout << "\n  Executed with exit code " << exit_code << std::endl;
+      std::cout << "\n\033[32m[fy] Executed with exit code " << exit_code
+                << "\n\033[0m" << std::endl;
     return exit_code;
   }
   error("Unreachable");

@@ -24,32 +24,30 @@ void mark_used_globals(LLVMValueRef entry) {
     }
   }
   if (LLVMIsAUser(entry))
-    for (unsigned i = 0, c = LLVMGetNumOperands(entry); i < c; i++)
+    for (size_t i = 0, c = LLVMGetNumOperands(entry); i < c; i++)
       mark_used_globals(LLVMGetOperand(entry, i));
 }
 
-void loop_and_delete(LLVMModuleRef module,
-                     LLVMValueRef (*first)(LLVMModuleRef mod),
-                     LLVMValueRef (*next)(LLVMValueRef last),
-                     void (*remove)(LLVMValueRef removed)) {
-  LLVMValueRef func = first(module);
-  while (func != NULL) {
-    LLVMValueRef nxt = next(func);
-    if (!is_global_used(func)) {
-      debug_log("Removing " << LLVMGetValueName(func));
-      remove(func);
+inline void loop_and_delete(LLVMModuleRef module,
+                            LLVMValueRef (*first)(LLVMModuleRef mod),
+                            LLVMValueRef (*next)(LLVMValueRef last),
+                            void (*remove)(LLVMValueRef removed)) {
+  LLVMValueRef curr = first(module);
+  while (curr != NULL) {
+    LLVMValueRef nxt = next(curr);
+    if (!is_global_used(curr)) {
+      debug_log("Removing " << LLVMGetValueName(curr));
+      remove(curr);
     }
-    func = nxt;
+    curr = nxt;
   }
 }
 
-// unused code removal - removes all unused globals and functions from a certain
-// entry point (often `fun main`)
+// unused code removal - removes all unused globals from a certain entry point
+// (often `fun main`)
 void remove_unused_globals(LLVMModuleRef module, LLVMValueRef entryPoint) {
   used_globals.clear();
   mark_used_globals(entryPoint);
-  loop_and_delete(module, LLVMGetFirstFunction, LLVMGetNextFunction,
-                  LLVMDeleteFunction);
-  loop_and_delete(module, LLVMGetFirstGlobal, LLVMGetNextGlobal,
+  loop_and_delete(module, LLVMGetLastGlobal, LLVMGetPreviousGlobal,
                   LLVMDeleteGlobal);
 }

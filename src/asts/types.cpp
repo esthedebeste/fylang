@@ -5,42 +5,59 @@
 
 static std::unordered_map<std::string, Type *> curr_named_types;
 class TypeAST {
-  Type *_type = nullptr;
-  virtual Type *gen_type() = 0;
-
 public:
   virtual ~TypeAST() {}
-  Type *type() {
-    if (!_type)
-      return _type = gen_type();
-    return _type;
-  }
-
+  virtual Type *type() = 0;
   LLVMTypeRef llvm_type() { return type()->llvm_type(); }
   TypeType type_type() { return type()->type_type(); }
+  virtual bool match(Type *type) = 0;
+  virtual bool is_generic() = 0;
+  bool castable_from(Type *type) {
+    if (is_generic())
+      return match(type);
+    return match(type) || type->castable_to(this->type());
+  }
   virtual bool eq(TypeAST *other) = 0;
   bool operator==(TypeAST *other) { return eq(other); }
   bool neq(TypeAST *other) { return !eq(other); };
-  std::string stringify() { return type()->stringify(); }
+  virtual std::string stringify() { return type()->stringify(); }
   PointerType *ptr() { return type()->ptr(); }
 };
 
+struct Generic {
+  std::vector<std::string> params;
+  TypeAST *ast;
+  Generic(std::vector<std::string> params, TypeAST *ast)
+      : params(params), ast(ast) {}
+  Type *generate(std::vector<Type *> args) {
+    if (args.size() != params.size())
+      error("wrong number of arguments to generic type");
+    for (size_t i = 0; i < params.size(); i++)
+      curr_named_types[params[i]] = args[i];
+    Type *type = ast->type();
+    return type;
+  }
+};
+static std::unordered_map<std::string, Generic *> curr_named_generics;
+
 class AbsoluteTypeAST : public TypeAST {
 public:
-  Type *type;
-  AbsoluteTypeAST(Type *type) : type(type) {}
-  Type *gen_type() { return type; }
-  bool eq(TypeAST *other) { return type->eq(other->type()); }
+  Type *typ;
+  AbsoluteTypeAST(Type *typ) : typ(typ) {}
+  Type *type() { return typ; }
+  bool eq(TypeAST *other) { return typ->eq(other->type()); }
+  bool match(Type *type) { return typ->eq(type); }
+  bool is_generic() { return false; }
 };
-static AbsoluteTypeAST *type_ast(Type *t) { return new AbsoluteTypeAST(t); }
+static TypeAST *type_ast(Type *t) { return new AbsoluteTypeAST(t); }
 
 class UnaryTypeAST : public TypeAST {
 public:
   int opc;
-  TypeAST *type;
-  UnaryTypeAST(int opc, TypeAST *type) : opc(opc), type(type) {}
-  Type *gen_type() {
-    Type *operand = type->type();
+  TypeAST *operand;
+  UnaryTypeAST(int opc, TypeAST *operand) : opc(opc), operand(operand) {}
+  Type *type() {
+    Type *operand = this->operand->type();
     switch (opc) {
     case '*':
       return operand->ptr();
@@ -66,11 +83,36 @@ public:
   }
   bool eq(TypeAST *other) {
     if (UnaryTypeAST *u = dynamic_cast<UnaryTypeAST *>(other))
-      return opc == u->opc && type->eq(u->type);
-    else
-      return TypeAST::type()->eq(other->type());
+      return opc == u->opc && operand->eq(u->operand);
+    else if (AbsoluteTypeAST *a = dynamic_cast<AbsoluteTypeAST *>(other))
+      return match(a->typ);
     return false;
   }
+  bool match(Type *type) {
+    switch (opc) {
+    case '*':
+      if (PointerType *ptr = dynamic_cast<PointerType *>(type))
+        return operand->match(ptr->get_points_to());
+      else
+        return false;
+    case '&':
+      return operand->match(type->ptr());
+    case T_UNSIGNED:
+      if (NumType *num = dynamic_cast<NumType *>(type))
+        return num->is_signed == false &&
+               operand->match(new NumType(num->bits, num->is_floating, true));
+      else
+        return false;
+    case T_SIGNED:
+      if (NumType *num = dynamic_cast<NumType *>(type))
+        return num->is_signed &&
+               operand->match(new NumType(num->bits, num->is_floating, true));
+      else
+        return false;
+    }
+    error("unimplemented unary op " + token_to_str(opc));
+  }
+  bool is_generic() { return operand->is_generic(); }
 };
 
 class FunctionTypeAST : public TypeAST {
@@ -82,35 +124,59 @@ public:
   FunctionTypeAST(TypeAST *return_type, std::vector<TypeAST *> args,
                   bool vararg)
       : return_type(return_type), args(args), vararg(vararg) {}
-  Type *gen_type() {
+  FunctionType *func_type() {
     std::vector<Type *> arg_types;
     for (auto arg : args)
       arg_types.push_back(arg->type());
-    return new FunctionType(return_type->type(), arg_types, vararg);
+    return new FunctionType(return_type ? return_type->type() : nullptr,
+                            arg_types, vararg);
   }
+  Type *type() { return func_type(); }
   bool eq(TypeAST *other) {
     FunctionTypeAST *f = dynamic_cast<FunctionTypeAST *>(other);
     if (f == nullptr || args.size() != f->args.size() || vararg != f->vararg)
       return false;
-    for (unsigned int i = 0; i < args.size(); i++)
+    for (size_t i = 0; i < args.size(); i++)
       if (!args[i]->eq(f->args[i]))
         return false;
     return return_type->eq(f->return_type);
+  }
+  bool match(Type *type) {
+    if (FunctionType *f = dynamic_cast<FunctionType *>(type)) {
+      if (args.size() != f->arguments.size() || vararg != f->vararg)
+        return false;
+      for (size_t i = 0; i < args.size(); i++)
+        if (!args[i]->match(f->arguments[i]))
+          return false;
+      return return_type->match(f->return_type);
+    }
+    return false;
+  }
+  bool is_generic() {
+    for (auto arg : args)
+      if (arg->is_generic())
+        return true;
+    return return_type == nullptr ? false : return_type->is_generic();
   }
 };
 
 class ArrayTypeAST : public TypeAST {
 public:
-  TypeAST *type;
-  int size;
-  ArrayTypeAST(TypeAST *type, int size) : type(type), size(size) {}
-  Type *gen_type() { return new ArrayType(type->type(), size); }
+  TypeAST *elem;
+  unsigned int count;
+  ArrayTypeAST(TypeAST *elem, unsigned int count) : elem(elem), count(count) {}
+  Type *type() { return new ArrayType(elem->type(), count); }
   bool eq(TypeAST *other) {
-    ArrayTypeAST *a = dynamic_cast<ArrayTypeAST *>(other);
-    if (!a)
-      return false;
-    return type->eq(a->type) && size == a->size;
+    if (ArrayTypeAST *a = dynamic_cast<ArrayTypeAST *>(other))
+      return elem->eq(a->elem) && count == a->count;
+    return false;
   }
+  bool match(Type *type) {
+    if (ArrayType *a = dynamic_cast<ArrayType *>(type))
+      return this->elem->match(a->elem) && count == a->count;
+    return false;
+  }
+  bool is_generic() { return elem->is_generic(); }
 };
 
 class StructTypeAST : public TypeAST {
@@ -120,7 +186,7 @@ public:
   StructTypeAST(std::string name,
                 std::vector<std::pair<std::string, TypeAST *>> members)
       : name(name), members(members) {}
-  Type *gen_type() {
+  Type *type() {
     std::vector<std::pair<std::string, Type *>> types;
     for (auto &m : members)
       types.push_back(std::make_pair(m.first, m.second->type()));
@@ -138,13 +204,31 @@ public:
         return false;
     return true;
   }
+  bool match(Type *type) {
+    if (StructType *s = dynamic_cast<StructType *>(type)) {
+      if (members.size() != s->fields.size())
+        return false;
+      for (size_t i = 0; i < members.size(); i++)
+        if (members[i].first != s->fields[i].first ||
+            !members[i].second->match(s->fields[i].second))
+          return false;
+      return true;
+    }
+    return false;
+  }
+  bool is_generic() {
+    for (auto &m : members)
+      if (m.second->is_generic())
+        return true;
+    return false;
+  }
 };
 
 class TupleTypeAST : public TypeAST {
 public:
   std::vector<TypeAST *> types;
   TupleTypeAST(std::vector<TypeAST *> types) : types(types) {}
-  Type *gen_type() {
+  Type *type() {
     std::vector<Type *> fields(types.size());
     for (size_t i = 0; i < types.size(); i++)
       fields[i] = types[i]->type();
@@ -161,31 +245,97 @@ public:
         return false;
     return true;
   }
+  bool match(Type *type) {
+    if (TupleType *t = dynamic_cast<TupleType *>(type)) {
+      if (types.size() != t->types.size())
+        return false;
+      for (size_t i = 0; i < types.size(); i++)
+        if (!types[i]->match(t->types[i]))
+          return false;
+      return true;
+    }
+    return false;
+  }
+  bool is_generic() {
+    for (auto t : types)
+      if (t->is_generic())
+        return true;
+    return false;
+  }
 };
 
 class NamedTypeAST : public TypeAST {
 public:
   std::string name;
   NamedTypeAST(std::string name) : name(name) {}
-  Type *gen_type() { return curr_named_types[name]; }
-  bool eq(TypeAST *other) { return type()->eq(other->type()); }
+  Type *type() {
+    if (!curr_named_types.count(name))
+      error("undefined type: " + name);
+    return curr_named_types[name];
+  }
+  bool eq(TypeAST *other) {
+    NamedTypeAST *n = dynamic_cast<NamedTypeAST *>(other);
+    return n && n->name == name;
+  }
+  bool match(Type *type) { return this->type()->eq(type); }
+  bool is_generic() { return false; }
+};
+
+class GenericAccessAST : public TypeAST {
+public:
+  std::string name;
+  std::vector<TypeAST *> params;
+  GenericAccessAST(std::string name, std::vector<TypeAST *> params)
+      : name(name), params(params) {}
+  Type *type() {
+    if (!curr_named_generics.count(name))
+      error("undefined generic type: " + name);
+    std::vector<Type *> args(params.size());
+    for (size_t i = 0; i < params.size(); i++)
+      args[i] = params[i]->type();
+    return curr_named_generics[name]->generate(args);
+  }
+  bool eq(TypeAST *other) {
+    NamedTypeAST *n = dynamic_cast<NamedTypeAST *>(other);
+    return n && n->name == name;
+  }
+  bool match(Type *type) { return this->type()->eq(type); }
+  bool is_generic() { return false; }
+  std::string stringify() {
+    std::stringstream ss;
+    ss << name << "<";
+    for (size_t i = 0; i < params.size(); i++) {
+      if (i != 0)
+        ss << ", ";
+      ss << params[i]->stringify();
+    }
+    ss << ">";
+    return ss.str();
+  }
 };
 
 class TypeofAST : public TypeAST {
 public:
   ExprAST *expr;
   TypeofAST(ExprAST *expr) : expr(expr) {}
-  Type *gen_type() { return expr->get_type(); }
+  Type *type() { return expr->get_type(); }
   bool eq(TypeAST *other) { return type()->eq(other->type()); }
+  bool match(Type *type) { return this->type()->eq(type); }
+  bool is_generic() { return false; }
 };
 
 class GenericTypeAST : public TypeAST {
 public:
   std::string name;
   GenericTypeAST(std::string name) : name(name) {}
-  Type *gen_type() { return nullptr; }
+  Type *type() { return curr_named_types[name]; }
   bool eq(TypeAST *other) {
-    curr_named_types[name] = other->type();
+    GenericTypeAST *g = dynamic_cast<GenericTypeAST *>(other);
+    return g && name == g->name;
+  }
+  bool match(Type *type) {
+    curr_named_types[name] = type;
     return true;
   }
+  bool is_generic() { return true; }
 };

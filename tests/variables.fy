@@ -1,10 +1,13 @@
-include "std/io"
+include "c/stdio"
+
+fun print(n: int)
+	printf("%d", n)
 
 const a = 3
 let b = 5
 fun main() {
 	const c = 2
 	let d = 6
-	printn(a * b + c * d)
+	print(a * b + c * d)
 	0
 }

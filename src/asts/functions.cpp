@@ -2,142 +2,256 @@
 #include "asts.cpp"
 #include "types.cpp"
 
-class TopLevelAST {
-public:
-  virtual ~TopLevelAST() {}
-  virtual LLVMValueRef gen_toplevel() = 0;
+#define type_string std::pair<TypeAST *, std::string>
+template <typename A, typename B> struct std::hash<std::pair<A, B>> {
+  size_t operator()(const std::pair<A, B> type) const {
+    return std::hash<A>()(type.first) ^ std::hash<B>()(type.second);
+  }
+};
+template <> struct std::hash<type_string> {
+  bool operator()(const type_string &type) const {
+    return std::hash<std::string>()(type.second);
+  }
+};
+template <> struct std::equal_to<type_string> {
+  bool operator()(const type_string &p1, const type_string &p2) const {
+    return p1.first->eq(p2.first) && p2.first->eq(p1.first) &&
+           p1.second == p2.second;
+  }
 };
 
-/// PrototypeAST - This class represents the "prototype" for a function,
-/// which captures its name, and its argument names (thus implicitly the
-/// number of arguments the function takes).
-class PrototypeAST {
+class MethodAST;
+static std::unordered_map<type_string, MethodAST *> curr_extension_methods;
+#undef type_string
+
+class FunctionAST;
+std::unordered_map<std::string, FunctionAST *> curr_named_functions;
+class FunctionAST {
 public:
   std::string name;
   std::vector<std::pair<std::string, TypeAST *>> args;
-  bool vararg;
-  TypeAST *return_type;
-  PrototypeAST(std::string name,
-               std::vector<std::pair<std::string, TypeAST *>> args,
-               TypeAST *return_type, bool vararg)
-      : name(name), args(args), vararg(vararg), return_type(return_type) {}
-  virtual void init_vars() {
-    for (auto &[name, type] : args)
-      curr_named_variables[name] = new ValueAndType(type->type());
+  ExprAST *body;
+  FunctionTypeAST ft;
+  FunctionAST(std::string name,
+              std::vector<std::pair<std::string, TypeAST *>> args, bool vararg,
+              TypeAST *return_type = nullptr, ExprAST *body = nullptr)
+      : name(name), args(args), body(body),
+        ft(return_type, seconds(args), vararg) {}
+  std::unordered_map<FunctionType *, FuncValue *> already_declared;
+  virtual std::string get_name(FunctionType *type) {
+    if (!ft.is_generic())
+      return name;
+    std::stringstream str;
+    str << name << "<";
+    size_t c = 0;
+    for (size_t i = 0; i < type->arguments.size(); i++) {
+      if (ft.args[i]->is_generic()) {
+        if (c != 0)
+          str << ", ";
+        str << type->arguments[i]->stringify();
+        c++;
+      }
+    }
+    str << ">";
+    return str.str();
   }
-  ValueAndType *vt = nullptr;
-  FunctionType *ft = nullptr;
-  virtual FunctionType *get_type() {
-    if (vt)
-      return ft;
-    std::vector<Type *> arg_types;
-    for (auto &[name, type] : args)
-      arg_types.push_back(type->type());
-    ft = new FunctionType(return_type->type(), arg_types, vararg);
-    vt = new ValueAndType(ft);
-    return ft;
-  }
-  virtual LLVMValueRef codegen() {
-    FunctionType *ft = get_type();
+  FuncValue *declare(FunctionType *type) {
+    std::string name = get_name(type);
+    if (already_declared.count(type))
+      return already_declared[type];
+    if (auto func = LLVMGetNamedFunction(curr_module, name.c_str()))
+      return already_declared[type] = new FuncValue(type, func);
     LLVMValueRef func =
-        LLVMAddFunction(curr_module, name.c_str(), ft->llvm_type());
-    curr_func_type = ft;
-    vt->value = new FuncValue(ft, func);
-    curr_named_variables[name] = vt;
-    // Set names for all arguments.
-    LLVMValueRef *params = new LLVMValueRef[args.size()];
-    LLVMGetParams(func, params);
-    for (size_t i = 0; i < args.size(); ++i)
-      LLVMSetValueName2(params[i], args[i].first.c_str(), args[i].first.size());
+        LLVMAddFunction(curr_module, name.c_str(), type->llvm_type());
+    already_declared[type] = new FuncValue(type, func);
+    return new FuncValue(type, func);
+  }
+  FunctionType *get_type() {
+    push_scope();
+    for (auto &[name, type] : this->args)
+      curr_scope->declare_variable(name, type->type());
+    FunctionType *type = ft.func_type();
+    if (!type->return_type && body)
+      type->return_type = body->get_type();
+    if (!type->return_type)
+      error("can't infer return type of function " + name);
+    declare(type); // declare function when accessed
+    pop_scope();
+    return type;
+  }
+  FunctionType *get_type(std::vector<ExprAST *> args) {
+    if (ft.vararg ? args.size() < this->args.size()
+                  : args.size() != this->args.size())
+      error("wrong number of arguments to function "
+            << name << " (expected " << this->args.size() << ", got "
+            << args.size() << ")");
+    for (size_t i = 0; i < args.size(); ++i) {
+      Type *arg_type = args[i]->get_type();
+      if (i < this->args.size() &&
+          !this->args[i].second->castable_from(arg_type))
+        error("argument " + std::to_string(i) + " to function " + name +
+              " has wrong type");
+    }
+    return get_type();
+  }
+  ConstValue *gen_call(std::vector<ExprAST *> args) {
+    if (ft.vararg ? args.size() < this->args.size()
+                  : args.size() != this->args.size())
+      error("wrong number of arguments to function "
+            << name << " (expected " << this->args.size() << ", got "
+            << args.size() << ")");
+    std::vector<Value *> arg_vals(args.size());
+    for (size_t i = 0; i < args.size(); ++i) {
+      Value *arg = args[i]->gen_value();
+      Type *arg_type = arg->get_type();
+      if (i < this->args.size()) {
+        if (this->args[i].second->castable_from(arg_type))
+          arg = arg->cast_to(this->args[i].second->type());
+        else
+          error("argument " + std::to_string(i) + " to function " + name +
+                " has wrong type");
+      }
+      arg_vals[i] = arg;
+    }
+    LLVMValueRef *vals = new LLVMValueRef[arg_vals.size()];
+    for (size_t i = 0; i < arg_vals.size(); ++i)
+      vals[i] = arg_vals[i]->gen_val();
+    FunctionType *type = ft.func_type();
+    push_scope();
 
-    LLVMSetValueName2(func, name.c_str(), name.size());
-    LLVMPositionBuilderAtEnd(curr_builder, LLVMGetFirstBasicBlock(func));
-    return func;
+    for (auto &[name, type] : this->args)
+      curr_scope->declare_variable(name, type->type());
+
+    if (!type->return_type) {
+      if (body)
+        type->return_type = body->get_type();
+      else
+        error("can't infer return type of function " + name);
+    }
+    FuncValue *declaration = declare(type);
+    LLVMValueRef call =
+        LLVMBuildCall2(curr_builder, type->llvm_type(), declaration->func, vals,
+                       arg_vals.size(), ("call_" + name).c_str());
+    if (body && !LLVMGetFirstBasicBlock(declaration->func)) {
+      for (size_t i = 0; i < type->arguments.size(); i++)
+        curr_scope->set_variable(
+            this->args[i].first,
+            new NamedValue(new ConstValue(type->arguments[i],
+                                          LLVMGetParam(declaration->func, i)),
+                           this->args[i].first));
+      size_t prev_unnamed = unnamed_acc;
+      unnamed_acc = 0;
+      FunctionType *prev_func_type = curr_func_type;
+      curr_func_type = type;
+      LLVMBasicBlockRef block = LLVMAppendBasicBlock(declaration->func, "");
+      LLVMPositionBuilderAtEnd(curr_builder, block);
+      Value *body_val = body->gen_value();
+      if (body_val->get_type()->neq(type->return_type))
+        body_val = body_val->cast_to(type->return_type);
+      LLVMBuildRet(curr_builder, body_val->gen_val());
+      curr_func_type = prev_func_type;
+      unnamed_acc = prev_unnamed;
+      if (auto next = LLVMGetNextInstruction(call))
+        LLVMPositionBuilderBefore(curr_builder, next);
+      else
+        LLVMPositionBuilderAtEnd(curr_builder, LLVMGetInstructionParent(call));
+    }
+    pop_scope();
+    return new ConstValue(type->return_type, call);
   }
-  virtual void set_return_type(TypeAST *return_type) {
-    this->return_type = return_type;
+
+  FuncValue *gen_ptr() {
+    if (ft.vararg ? args.size() < this->args.size()
+                  : args.size() != this->args.size())
+      error("wrong number of arguments to function "
+            << name << " (expected " << this->args.size() << ", got "
+            << args.size() << ")");
+    push_scope();
+    for (auto &[name, type] : this->args)
+      curr_scope->declare_variable(name, type->type());
+
+    FunctionType *type = ft.func_type();
+    if (!type->return_type) {
+      if (body)
+        type->return_type = body->get_type();
+      else
+        error("can't infer return type of function " + name);
+    }
+    FuncValue *declaration = declare(type);
+    if (body && !LLVMGetFirstBasicBlock(declaration->func)) {
+      LLVMValueRef position_back_to =
+          LLVMGetInsertBlock(curr_builder)
+              ? LLVMBuildAlloca(curr_builder, VoidType().llvm_type(), UN)
+              : nullptr;
+      for (size_t i = 0; i < type->arguments.size(); i++)
+        curr_scope->set_variable(
+            this->args[i].first,
+            new NamedValue(new ConstValue(type->arguments[i],
+                                          LLVMGetParam(declaration->func, i)),
+                           this->args[i].first));
+      FunctionType *prev_func_type = curr_func_type;
+      curr_func_type = type;
+      size_t prev_unnamed = unnamed_acc;
+      unnamed_acc = 0;
+      LLVMBasicBlockRef block = LLVMAppendBasicBlock(declaration->func, "");
+      LLVMPositionBuilderAtEnd(curr_builder, block);
+      Value *body_val = body->gen_value();
+      if (body_val->get_type()->neq(type->return_type))
+        body_val = body_val->cast_to(type->return_type);
+      LLVMBuildRet(curr_builder, body_val->gen_val());
+      unnamed_acc = prev_unnamed;
+      curr_func_type = prev_func_type;
+      if (position_back_to) {
+        if (auto next = LLVMGetNextInstruction(position_back_to))
+          LLVMPositionBuilderBefore(curr_builder, next);
+        else
+          LLVMPositionBuilderAtEnd(curr_builder,
+                                   LLVMGetInstructionParent(position_back_to));
+        LLVMInstructionEraseFromParent(position_back_to);
+      }
+    }
+    pop_scope();
+    return declaration;
   }
+
+  virtual void add() { curr_named_functions[name] = this; }
 };
-class MethodAST : public PrototypeAST {
+
+auto add_this_type(std::vector<std::pair<std::string, TypeAST *>> args,
+                   TypeAST *type) {
+  args.push_back(std::make_pair("this", type));
+  return args;
+}
+
+class MethodAST : public FunctionAST {
 public:
   TypeAST *this_type;
   MethodAST(TypeAST *this_type, std::string name,
-            std::vector<std::pair<std::string, TypeAST *>> args,
-            TypeAST *return_type, bool vararg)
-      : this_type(this_type), PrototypeAST(name, args, return_type, vararg) {}
-  void init_vars() {
-    PrototypeAST::init_vars();
-    curr_named_variables[std::string("this", 4)] =
-        new ValueAndType(this_type->type());
+            std::vector<std::pair<std::string, TypeAST *>> args, bool vararg,
+            TypeAST *return_type = nullptr, ExprAST *body = nullptr)
+      : FunctionAST(name, add_this_type(args, this_type), vararg, return_type,
+                    body),
+        this_type(this_type) {}
+  std::string get_name(FunctionType *type) {
+    return this_type->stringify() + ":" + name;
+  }
+  FunctionType *get_type(std::vector<ExprAST *> args, ExprAST *this_arg) {
+    args.push_back(this_arg);
+    return FunctionAST::get_type(args);
+  }
+  Value *gen_call(std::vector<ExprAST *> args, ExprAST *this_arg) {
+    args.push_back(this_arg);
+    return FunctionAST::gen_call(args);
   }
 
-  PrototypeAST *proto = nullptr;
-  FunctionType *get_type() {
-    if (proto)
-      return proto->get_type();
-    std::string compiled_name = this_type->stringify() + ":" + name;
-    args.push_back(std::make_pair("this", this_type));
-    proto = new PrototypeAST(compiled_name, args, return_type, vararg);
-    FunctionType *type = proto->get_type();
-    curr_extension_methods[{this_type->type(), name}] = proto->vt;
-    return type;
-  }
-
-  LLVMValueRef codegen() {
-    get_type();
-    return proto->codegen();
-  }
-
-  void set_return_type(TypeAST *return_type) {
-    this->return_type = return_type;
-    if (proto)
-      proto->return_type = return_type;
+  virtual void add() {
+    curr_extension_methods[std::make_pair(this_type, name)] = this;
   }
 };
 
-/// FunctionAST - This class represents a function definition itself.
-class FunctionAST : public TopLevelAST {
-
-public:
-  PrototypeAST *proto;
-  ExprAST *body;
-  FunctionAST(PrototypeAST *proto, ExprAST *body) : proto(proto), body(body) {}
-
-  LLVMValueRef gen_toplevel() {
-    proto->init_vars();
-    if (proto->return_type == nullptr)
-      proto->set_return_type(type_ast(body->get_type()));
-    // First, check for an existing function from a previous 'declare'
-    // declaration.
-    LLVMValueRef func = LLVMGetNamedFunction(curr_module, proto->name.c_str());
-
-    if (!func)
-      func = proto->codegen();
-
-    if (!func)
-      error("funcless behavior");
-
-    if (LLVMCountBasicBlocks(func) != 0)
-      error("Function cannot be redefined.");
-
-    auto block = LLVMAppendBasicBlockInContext(curr_ctx, func, "");
-    LLVMPositionBuilderAtEnd(curr_builder, block);
-    size_t args_len = LLVMCountParams(func);
-    LLVMValueRef *params = new LLVMValueRef[args_len];
-    LLVMGetParams(func, params);
-    for (unsigned i = 0; i != args_len; ++i) {
-      size_t len = 0;
-      const char *name = LLVMGetValueName2(params[i], &len);
-      curr_named_variables[std::string(name, len)]->value =
-          new ConstValue(proto->args[i].second->type(), params[i]);
-    }
-    Value *ret_val = body->gen_value()->cast_to(proto->get_type()->return_type);
-    // Finish off the function.
-    LLVMBuildRet(curr_builder, ret_val->gen_val());
-    unnamed_acc = 0;
-    return func;
-    // doesnt exist in c api (i think)
-    // // Validate the generated code, checking for consistency.
-    // // verifyFunction(*TheFunction);
-  }
-};
+MethodAST *get_method(Type *this_type, std::string name) {
+  for (auto &[type, method] : curr_extension_methods)
+    if (type.first->match(this_type) && type.second == name)
+      return method;
+  return nullptr;
+}

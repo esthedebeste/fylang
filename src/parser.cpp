@@ -17,10 +17,11 @@ static void eat(const int expected_token) {
 static ExprAST *parse_expr();
 static ExprAST *parse_primary();
 static ExprAST *parse_unary();
+std::vector<ExprAST *> parse_call();
 
 static TypeAST *parse_type_unary();
 static TypeAST *parse_type_postfix();
-inline TypeAST *parse_type() { return parse_type_postfix(); }
+inline TypeAST *parse_type() { return parse_type_unary(); }
 static TypeAST *parse_function_type() {
   eat(T_FUNCTION);
   eat('(');
@@ -58,6 +59,18 @@ static TypeAST *parse_num_type() {
   check_type("uint", false, false);
   else check_type("int", false, true);
   else check_type("float", true, true);
+  else if (curr_token == '<') {
+    eat('<');
+    std::vector<TypeAST *> args;
+    while (true) {
+      args.push_back(parse_type());
+      if (curr_token == '>')
+        break;
+      eat(',');
+    }
+    eat('>');
+    return new GenericAccessAST(id, args);
+  }
   else return new NamedTypeAST(id);
 #undef strlen
 #undef check_type
@@ -67,9 +80,26 @@ static TypeDefAST *parse_type_definition() {
   eat(T_TYPE);
   std::string name = identifier_string;
   eat(T_IDENTIFIER);
+  std::vector<std::string> generics;
+  bool is_generic = false;
+  if (curr_token == '<') {
+    is_generic = true;
+    eat('<');
+    while (true) {
+      generics.push_back(identifier_string);
+      eat(T_IDENTIFIER);
+      if (curr_token == '>')
+        break;
+      eat(',');
+    }
+    eat('>');
+  }
   eat('=');
   TypeAST *t = parse_type();
-  return new TypeDefAST(name, t);
+  if (is_generic)
+    return new GenericTypeDefAST(name, generics, t);
+  else
+    return new AbsoluteTypeDefAST(name, t);
 }
 
 static TypeAST *parse_tuple_type() {
@@ -85,13 +115,13 @@ static TypeAST *parse_tuple_type() {
   eat('}');
   return new TupleTypeAST(types);
 }
-static TypeAST *parse_type_unary() {
+static TypeAST *parse_primary_type() {
   switch (curr_token) {
   case T_FUNCTION:
     return parse_function_type();
   case '{':
     return parse_tuple_type();
-  case T_TYPEOF:
+  case T_TYPEOF: {
     eat(T_TYPEOF);
     bool paren = curr_token == '(';
     if (paren)
@@ -101,18 +131,13 @@ static TypeAST *parse_type_unary() {
       eat(')');
     return type;
   }
-  // If the current token is not a unary type operator, just parse type
-  if (!(curr_token == '&' || curr_token == '*' || curr_token == T_UNSIGNED ||
-        curr_token == T_SIGNED))
+  case T_IDENTIFIER:
     return parse_num_type();
-  // If this is a unary operator, read it.
-  int opc = curr_token;
-  eat(opc);
-  TypeAST *operand = parse_type();
-  return new UnaryTypeAST(opc, operand);
+  }
+  error("Unexpected token '" + token_to_str(curr_token) + "'");
 }
 static TypeAST *parse_type_postfix() {
-  TypeAST *prev = parse_type_unary();
+  TypeAST *prev = parse_primary_type();
   while (1) {
     switch (curr_token) {
     case '[': {
@@ -133,6 +158,22 @@ static TypeAST *parse_type_postfix() {
       return prev;
     }
   }
+}
+static TypeAST *parse_type_unary() {
+  if (curr_token == T_GENERIC) {
+    eat(T_GENERIC);
+    std::string name = identifier_string;
+    eat(T_IDENTIFIER);
+    return new GenericTypeAST(name);
+  }
+  // If the current token is not a unary type operator, just parse type
+  if (type_unaries.count(curr_token) == 0)
+    return parse_type_postfix();
+  // if it is a unary type operator, parse it
+  int opc = curr_token;
+  eat(opc);
+  TypeAST *operand = parse_type_unary();
+  return new UnaryTypeAST(opc, operand);
 }
 static ExprAST *parse_number_expr() {
   // TODO: parse number base (hex 0x, binary 0b, octal 0o)
@@ -177,6 +218,10 @@ static ExprAST *parse_paren_expr() {
 static ExprAST *parse_identifier_expr() {
   std::string id = identifier_string;
   eat(T_IDENTIFIER);
+  if (curr_token == '(') {
+    std::vector<ExprAST *> args = parse_call();
+    return new NameCallExprAST(id, args);
+  }
   return new VariableExprAST(id);
 }
 /// ifexpr
@@ -253,7 +298,7 @@ static ExprAST *parse_new_expr() {
     tuple->is_new = true;
     return tuple;
   }
-  auto type = parse_num_type();
+  auto type = parse_primary_type();
   std::vector<std::pair<std::string, ExprAST *>> fields;
   eat('{');
   if (curr_token != '}')
@@ -311,6 +356,17 @@ static LetExprAST *parse_let_expr() {
   return new LetExprAST(id, type, value, constant);
 }
 
+static SizeofExprAST *parse_sizeof_expr() {
+  eat(T_SIZEOF);
+  bool paren = curr_token == '(';
+  if (paren)
+    eat('(');
+  TypeAST *type = parse_type();
+  if (paren)
+    eat(')');
+  return new SizeofExprAST(type);
+}
+
 static BoolExprAST *parse_bool_expr() {
   bool val = curr_token == T_TRUE;
   eat(curr_token);
@@ -338,7 +394,7 @@ static ExprAST *parse_primary() {
   switch (curr_token) {
   default:
     error("Error: unexpected token '" + token_to_str(curr_token) +
-          "' when expecting an expression");
+          "' when expecting a primary");
   case T_IDENTIFIER:
     return parse_identifier_expr();
   case T_NUMBER:
@@ -363,6 +419,8 @@ static ExprAST *parse_primary() {
   case T_TRUE:
   case T_FALSE:
     return parse_bool_expr();
+  case T_SIZEOF:
+    return parse_sizeof_expr();
   case T_DUMP:
     return parse_type_dump();
   case T_ASSERT_TYPE:
@@ -382,7 +440,7 @@ static int get_token_precedence() {
   return t_prec;
 }
 
-static std::vector<ExprAST *> parse_call() {
+std::vector<ExprAST *> parse_call() {
   eat('(');
   std::vector<ExprAST *> args;
   if (curr_token != ')') {
@@ -396,9 +454,6 @@ static std::vector<ExprAST *> parse_call() {
   eat(')');
   return args;
 }
-/// unary
-///   ::= primary
-///   ::= '.' identifier
 static ExprAST *parse_postfix() {
   ExprAST *prev = parse_primary();
   while (1)
@@ -425,7 +480,7 @@ static ExprAST *parse_postfix() {
     case '(': {
       // function call
       auto call = parse_call();
-      prev = new CallExprAST(prev, call);
+      prev = new ValueCallExprAST(prev, call);
       break;
     }
     case '[': {
@@ -449,27 +504,13 @@ static ExprAST *parse_postfix() {
 ///   ::= primary
 ///   ::= '!' unary
 static ExprAST *parse_unary() {
-  if (curr_token == T_SIZEOF) {
-    eat(T_SIZEOF);
-    bool paren = curr_token == '(';
-    if (paren)
-      eat('(');
-    TypeAST *type = parse_type();
-    if (paren)
-      eat(')');
-    return new SizeofExprAST(type);
-  }
-  // If the current token is not an operator, it must be a primary expr.
-  if (curr_token != T_RETURN && !isascii(curr_token) || curr_token == '(' ||
-      curr_token == ',' || curr_token == '{')
+  if (unaries.count(curr_token) == 0) // not a unary op
     return parse_postfix();
 
-  // If this is a unary operator, read it.
   int opc = curr_token;
   eat(opc);
-  if (auto operand = parse_unary())
-    return new UnaryExprAST(opc, operand);
-  return nullptr;
+  ExprAST *operand = parse_unary();
+  return new UnaryExprAST(opc, operand);
 }
 /// binoprhs
 ///   ::= ('+' primary)*
@@ -494,8 +535,6 @@ static ExprAST *parse_bin_op_rhs(int expr_prec, ExprAST *LHS) {
     }
     // Parse the primary expression after the binary operator.
     auto RHS = parse_unary();
-    if (!RHS)
-      return nullptr;
 
     // If BinOp binds less tightly with RHS than the operator after RHS, let
     // the pending operator take RHS as its LHS.
@@ -518,7 +557,7 @@ static ExprAST *parse_expr() {
 /// prototype
 ///   ::= id '(' id* ')'
 ///   ::= '(' type ')' id '(' id* ')'
-static PrototypeAST *parse_prototype(TypeAST *default_return_type = nullptr) {
+static FunctionAST *parse_prototype(TypeAST *default_return_type = nullptr) {
   TypeAST *this_t = nullptr;
   if (curr_token == '(') {
     // type method
@@ -559,17 +598,18 @@ static PrototypeAST *parse_prototype(TypeAST *default_return_type = nullptr) {
     return_type = default_return_type;
 
   if (this_t)
-    return new MethodAST(this_t, fn_name, args, return_type, vararg);
+    return new MethodAST(this_t, fn_name, args, vararg, return_type);
   else
-    return new PrototypeAST(fn_name, args, return_type, vararg);
+    return new FunctionAST(fn_name, args, vararg, return_type);
 }
 
 /// definition ::= 'fun' prototype expression
 static FunctionAST *parse_definition() {
   eat(T_FUNCTION);
-  auto proto = parse_prototype(nullptr /* assume from body */);
-  auto e = parse_expr();
-  return new FunctionAST(proto, e);
+  FunctionAST *func = parse_prototype(nullptr /* assume from body */);
+  auto body = parse_expr();
+  func->body = body;
+  return func;
 }
 /// declare
 ///   ::= 'fun' prototype
@@ -578,24 +618,36 @@ static DeclareExprAST *parse_declare() {
   eat(T_DECLARE); // eat declare.
   if (curr_token == T_FUNCTION) {
     eat(T_FUNCTION);
-    PrototypeAST *proto =
-        parse_prototype(type_ast(new NumType(32, false, true)));
-    return new DeclareExprAST(proto);
+    FunctionAST *func = parse_prototype(type_ast(new NumType(32, false, true)));
+    return new DeclareExprAST(func);
   } else if (curr_token == T_CONST || curr_token == T_LET) {
     LetExprAST *let = parse_let_expr();
     return new DeclareExprAST(let);
   } else
     error("Unexpected 'declare " + token_to_str(curr_token) +
           "', expected 'fun', 'let', or 'const'");
-  return nullptr;
 }
 
 /// struct
 ///   ::= 'struct' identifier '{' (identifier: type)* '}'
-static StructAST *parse_struct() {
+static TypeDefAST *parse_struct() {
   eat(T_STRUCT); // eat struct.
   std::string struct_name = identifier_string;
   eat(T_IDENTIFIER);
+  std::vector<std::string> generic_params;
+  bool is_generic = false;
+  if (curr_token == '<') {
+    is_generic = true;
+    eat('<');
+    while (true) {
+      generic_params.push_back(identifier_string);
+      eat(T_IDENTIFIER);
+      if (curr_token == '>')
+        break;
+      eat(',');
+    }
+    eat('>');
+  }
   eat('{');
   std::vector<std::pair<std::string, TypeAST *>> members;
   if (curr_token != '}')
@@ -610,7 +662,12 @@ static StructAST *parse_struct() {
       eat(',');
     }
   eat('}');
-  return new StructAST(struct_name, members);
+  if (is_generic)
+    return new GenericTypeDefAST(struct_name, generic_params,
+                                 new StructTypeAST(struct_name, members));
+  else
+    return new AbsoluteTypeDefAST(struct_name,
+                                  new StructTypeAST(struct_name, members));
 }
 
 /// include ::= 'include' string_expr
