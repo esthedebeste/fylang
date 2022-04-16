@@ -30,7 +30,7 @@ fun(String) concat(other: String): String {
 }
 
 fun(String) transform(transformer: *fun(char): char): String {
-	let uppered = alloc_chars(this.length)
+	const uppered = alloc_chars(this.length)
 	for (let i: uint_ptrsize = 0; i < this.length; i += 1)
 		uppered[i] = transformer(this.chars[i])
 	create String { chars = uppered, length = this.length }

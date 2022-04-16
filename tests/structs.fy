@@ -7,11 +7,8 @@ fun print(n: int)
 
 fun heap()
 	new Num { x = 1 }
-fun stack() {
-	let b: Num
-	b.x = 2
-	b
-}
+fun stack()
+	create Num { x = 2 }
 
 fun tuple()
    (3, )

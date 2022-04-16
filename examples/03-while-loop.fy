@@ -4,7 +4,7 @@ include "std/string"
 
 fun main() {
 	const str = "Hello World!"
-	let i = 0
+	let i = 0 as uint_ptrsize // similar to size_t
 	while (i < str.length) {
 		print(str[i])
 		i += 1

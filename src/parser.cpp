@@ -256,6 +256,7 @@ static ExprAST *parse_if_expr() {
   case TYPE_IF:
     return new TypeIfExprAST(a, b, then, elze);
   }
+  return nullptr;
 }
 /// whileexpr ::= 'while' (expression) expression else expression
 static ExprAST *parse_while_expr() {

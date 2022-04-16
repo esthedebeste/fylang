@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits.h>
 #include <math.h>
 #include <set>
 #include <sstream>
@@ -18,6 +19,8 @@ extern "C" {
 }
 bool DEBUG = false;
 std::string std_dir;
+std::string os_name;
+typedef unsigned int uint;
 enum Token : const int {
   T_EOF = -0xffff, // end of file
   T_IDENTIFIER,    // foo

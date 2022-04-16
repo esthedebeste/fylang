@@ -5,7 +5,7 @@ include "std/string"
 // `*fun(arg_type1, arg_type2, ...): return_type`
 fun print_filtered(str: String, predicate: *fun(char): bool) {
 	for(let i = 0; i < str.length; i += 1) {
-		let char = str[i]
+		const char = str[i]
 		if(predicate(char))
 			print(char)
 	}

@@ -6,10 +6,6 @@ type FILE = unknown
 type fpos_t = unknown
 type off_t = unknown
 
-declare const stderr: *FILE
-declare const stdout: *FILE
-declare const stdin: *FILE
-
 declare fun remove(filename: *char): int
 declare fun rename(old_p: *char, new_p: *char): int
 declare fun tmpfile(): *FILE

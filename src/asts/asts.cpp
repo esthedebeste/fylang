@@ -278,16 +278,14 @@ public:
     LLVMSetInitializer(glob, data);
     LLVMSetLinkage(glob, LLVMInternalLinkage);
     LLVMSetUnnamedAddress(glob, LLVMGlobalUnnamedAddr);
+    LLVMValueRef zeros[2] = {
+        LLVMConstInt(NumType(false).llvm_type(), 0, false),
+        LLVMConstInt(NumType(false).llvm_type(), 0, false)};
     // cast [ ... x i8 ]* to i8*
-    LLVMValueRef char_ptr = LLVMConstGEP2(
-        t_type->llvm_type(), glob,
-        (LLVMValueRef[]){LLVMConstInt(NumType(false).llvm_type(), 0, false),
-                         LLVMConstInt(NumType(false).llvm_type(), 0, false)},
-        2);
-    LLVMValueRef string = LLVMConstStruct(
-        (LLVMValueRef[]){char_ptr, LLVMConstInt(NumType(false).llvm_type(),
-                                                str.size(), false)},
-        2, true);
+    LLVMValueRef char_ptr = LLVMConstGEP2(t_type->llvm_type(), glob, zeros, 2);
+    LLVMValueRef string_values[2] = {
+        char_ptr, LLVMConstInt(NumType(false).llvm_type(), str.size(), false)};
+    LLVMValueRef string = LLVMConstStruct(string_values, 2, true);
     return new ConstValue(string_type, string);
   }
 };
@@ -643,32 +641,25 @@ public:
 class NumAccessExprAST : public ExprAST {
   bool is_ptr;
   TupleType *source_type;
-  Type *type = nullptr;
 
 public:
   unsigned int index;
   ExprAST *source;
   NumAccessExprAST(unsigned int index, ExprAST *source)
       : index(index), source(source) {}
-  void init() {
-    if (type)
-      return; // already initialized
+
+  Type *get_type() {
     Type *st = source->get_type();
     if (st->type_type() == TypeType::Pointer) {
       st = dynamic_cast<PointerType *>(source->get_type())->get_points_to();
       is_ptr = true;
     }
     source_type = dynamic_cast<TupleType *>(st);
-    type = source_type->get_elem_type(index);
-  }
-
-  Type *get_type() {
-    init();
-    return type;
+    return source_type->get_elem_type(index);
   }
 
   Value *gen_value() {
-    init();
+    Type *type = get_type();
     Value *src = source->gen_value();
     // If src is a struct-pointer (*String) then access on the value, if src
     // is a struct-value (String) then access on the pointer to where it's
@@ -686,37 +677,32 @@ class PropAccessExprAST : public ExprAST {
   bool is_ptr;
   StructType *source_type;
   unsigned int index;
-  Type *type = nullptr;
 
 public:
   std::string key;
   ExprAST *source;
   PropAccessExprAST(std::string key, ExprAST *source)
       : key(key), source(source) {}
-  void init() {
-    if (type)
-      return; // already initialized
+
+  Type *get_type() {
     Type *st = source->get_type();
     if (st->type_type() == TypeType::Pointer) {
       st = dynamic_cast<PointerType *>(source->get_type())->get_points_to();
       is_ptr = true;
-    }
+    } else
+      is_ptr = false;
     StructType *struct_t = dynamic_cast<StructType *>(st);
     if (!struct_t)
       error("Invalid property access for key '" + key + "', " +
             st->stringify() + " is not a struct.");
     index = struct_t->get_index(key);
-    type = struct_t->get_elem_type(index);
+    Type *type = struct_t->get_elem_type(index);
     source_type = struct_t;
-  }
-
-  Type *get_type() {
-    init();
     return type;
   }
 
   Value *gen_value() {
-    init();
+    Type *type = get_type();
     Value *src = source->gen_value();
     if (!is_ptr && !src->has_ptr())
       return new ConstValue(
@@ -816,23 +802,20 @@ public:
 class TupleExprAST : public ExprAST {
   std::vector<ExprAST *> values;
   TupleType *t_type;
-  Type *_type = nullptr;
 
 public:
   bool is_new;
   TupleExprAST(std::vector<ExprAST *> values) : values(values) {}
 
   Type *get_type() {
-    if (_type)
-      return _type;
     std::vector<Type *> types;
     for (auto &value : values)
       types.push_back(value->get_type());
     t_type = new TupleType(types);
     if (is_new)
-      return _type = t_type->ptr();
+      return t_type->ptr();
     else
-      return _type = t_type;
+      return t_type;
   }
 
   Value *gen_value() {

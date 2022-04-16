@@ -10,6 +10,7 @@ public:
   std::string file_path;
   std::ifstream file;
   CharReader(std::string file_path) : file_path(file_path), file(file_path) {}
+  ~CharReader() { file.close(); }
   char next_char() {
     if (ended) {
       if (DEBUG)
@@ -17,7 +18,8 @@ public:
       return EOF;
     }
     if (n == 0) {
-      n = file.readsome(buf, sizeof(buf));
+      file.read(buf, sizeof(buf));
+      n = file.gcount();
       p = buf;
     }
     char ret = n-- > 0 ? *p++ : EOF;

@@ -34,6 +34,11 @@ static void handle_global_type() {
 static void handle_global_include() {
   std::string file_name = parse_include();
   debug_log("Parsed an include (" << file_name << ")");
+  size_t os_loc = file_name.find("{os}");
+  if (os_loc != std::string::npos) {
+    file_name = file_name.replace(os_loc, 4, os_name);
+    debug_log("Replaced {os} with '" << os_name << "'");
+  }
   CharReader *curr_file = queue.back();
   add_file_to_queue(curr_file->file_path, file_name);
   get_next_token();
@@ -73,6 +78,14 @@ static void main_loop() {
   }
 }
 
+std::string get_os(std::string triple) {
+  // triple: "x86_64-unknown-linux-gnu"
+  // slice away first two parts, triple: "linux-gnu"
+  size_t start = triple.find('-', triple.find('-') + 1) + 1;
+  // slice away last part, triple: "linux"
+  return triple.substr(start, triple.find('-', start) - start);
+}
+
 int main(int argc, char **argv, char **envp) {
   if (argc < 2) {
     printf("Usage: %s [run|com] <filename> (output)\n", argv[0]);
@@ -101,6 +114,7 @@ int main(int argc, char **argv, char **envp) {
   LLVMInitializeNativeTarget();
   if (LLVMGetTargetFromTriple(target_triple, &target, &error_message) != 0)
     error(error_message);
+  os_name = get_os(target_triple);
   char *host_cpu_name = LLVMGetHostCPUName();
   char *host_cpu_features = LLVMGetHostCPUFeatures();
   LLVMTargetMachineRef target_machine = LLVMCreateTargetMachine(

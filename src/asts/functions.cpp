@@ -130,9 +130,8 @@ public:
       LLVMBasicBlockRef block = LLVMAppendBasicBlock(declaration->func, "");
       LLVMPositionBuilderAtEnd(curr_builder, block);
       Value *body_val = body->gen_value();
-      if (body_val->get_type()->neq(type->return_type))
-        body_val = body_val->cast_to(type->return_type);
-      LLVMBuildRet(curr_builder, body_val->gen_val());
+      LLVMBuildRet(curr_builder,
+                   body_val->cast_to(type->return_type)->gen_val());
       curr_func_type = prev_func_type;
       unnamed_acc = prev_unnamed;
       if (auto next = LLVMGetNextInstruction(call))
@@ -180,9 +179,8 @@ public:
       LLVMBasicBlockRef block = LLVMAppendBasicBlock(declaration->func, "");
       LLVMPositionBuilderAtEnd(curr_builder, block);
       Value *body_val = body->gen_value();
-      if (body_val->get_type()->neq(type->return_type))
-        body_val = body_val->cast_to(type->return_type);
-      LLVMBuildRet(curr_builder, body_val->gen_val());
+      LLVMBuildRet(curr_builder,
+                   body_val->cast_to(type->return_type)->gen_val());
       unnamed_acc = prev_unnamed;
       curr_func_type = prev_func_type;
       if (position_back_to) {
@@ -234,7 +232,7 @@ public:
 MethodAST *get_method(Type *this_type, std::string name) {
   if (!curr_extension_methods.count(name))
     return nullptr;
-  uint min_generic = std::numeric_limits<uint>::max();
+  uint min_generic = UINT_MAX;
   MethodAST *best_match = nullptr;
   for (auto &method : curr_extension_methods[name]) {
     uint generic_count = 0;

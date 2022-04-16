@@ -32,6 +32,7 @@ static std::string tt_to_str(TypeType tt) {
   case String:
     return "string";
   }
+  error("Unknown TypeType");
 };
 class PointerType;
 /// Base type class.
