@@ -2,27 +2,9 @@
 #include "asts.cpp"
 #include "types.cpp"
 
-#define type_string std::pair<TypeAST *, std::string>
-template <typename A, typename B> struct std::hash<std::pair<A, B>> {
-  size_t operator()(const std::pair<A, B> type) const {
-    return std::hash<A>()(type.first) ^ std::hash<B>()(type.second);
-  }
-};
-template <> struct std::hash<type_string> {
-  bool operator()(const type_string &type) const {
-    return std::hash<std::string>()(type.second);
-  }
-};
-template <> struct std::equal_to<type_string> {
-  bool operator()(const type_string &p1, const type_string &p2) const {
-    return p1.first->eq(p2.first) && p2.first->eq(p1.first) &&
-           p1.second == p2.second;
-  }
-};
-
 class MethodAST;
-static std::unordered_map<type_string, MethodAST *> curr_extension_methods;
-#undef type_string
+static std::unordered_map<std::string, std::vector<MethodAST *>>
+    curr_extension_methods;
 
 class FunctionAST;
 std::unordered_map<std::string, FunctionAST *> curr_named_functions;
@@ -90,7 +72,8 @@ public:
       if (i < this->args.size() &&
           !this->args[i].second->castable_from(arg_type))
         error("argument " + std::to_string(i) + " to function " + name +
-              " has wrong type");
+              " has wrong type, got: " + arg_type->stringify() +
+              ", expected: " + this->args[i].second->stringify());
     }
     return get_type();
   }
@@ -109,7 +92,8 @@ public:
           arg = arg->cast_to(this->args[i].second->type());
         else
           error("argument " + std::to_string(i) + " to function " + name +
-                " has wrong type");
+                " has wrong type, got: " + arg_type->stringify() +
+                ", expected: " + this->args[i].second->stringify());
       }
       arg_vals[i] = arg;
     }
@@ -233,7 +217,7 @@ public:
                     body),
         this_type(this_type) {}
   std::string get_name(FunctionType *type) {
-    return this_type->stringify() + ":" + name;
+    return this_type->stringify() + "." + FunctionAST::get_name(type);
   }
   FunctionType *get_type(std::vector<ExprAST *> args, ExprAST *this_arg) {
     args.push_back(this_arg);
@@ -244,14 +228,20 @@ public:
     return FunctionAST::gen_call(args);
   }
 
-  virtual void add() {
-    curr_extension_methods[std::make_pair(this_type, name)] = this;
-  }
+  virtual void add() { curr_extension_methods[name].push_back(this); }
 };
 
 MethodAST *get_method(Type *this_type, std::string name) {
-  for (auto &[type, method] : curr_extension_methods)
-    if (type.first->match(this_type) && type.second == name)
-      return method;
-  return nullptr;
+  if (!curr_extension_methods.count(name))
+    return nullptr;
+  uint min_generic = std::numeric_limits<uint>::max();
+  MethodAST *best_match = nullptr;
+  for (auto &method : curr_extension_methods[name]) {
+    uint generic_count = 0;
+    if (method->this_type->match(this_type, &generic_count) &&
+        generic_count < min_generic) {
+      min_generic = generic_count, best_match = method;
+    }
+  }
+  return best_match;
 }

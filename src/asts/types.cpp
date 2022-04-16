@@ -10,7 +10,7 @@ public:
   virtual Type *type() = 0;
   LLVMTypeRef llvm_type() { return type()->llvm_type(); }
   TypeType type_type() { return type()->type_type(); }
-  virtual bool match(Type *type) = 0;
+  virtual bool match(Type *type, uint *generic_count = nullptr) = 0;
   virtual bool is_generic() = 0;
   bool castable_from(Type *type) {
     if (is_generic())
@@ -46,7 +46,7 @@ public:
   AbsoluteTypeAST(Type *typ) : typ(typ) {}
   Type *type() { return typ; }
   bool eq(TypeAST *other) { return typ->eq(other->type()); }
-  bool match(Type *type) { return typ->eq(type); }
+  bool match(Type *type, uint *g) { return typ->eq(type); }
   bool is_generic() { return false; }
 };
 static TypeAST *type_ast(Type *t) { return new AbsoluteTypeAST(t); }
@@ -85,28 +85,30 @@ public:
     if (UnaryTypeAST *u = dynamic_cast<UnaryTypeAST *>(other))
       return opc == u->opc && operand->eq(u->operand);
     else if (AbsoluteTypeAST *a = dynamic_cast<AbsoluteTypeAST *>(other))
-      return match(a->typ);
+      return match(a->typ, nullptr);
     return false;
   }
-  bool match(Type *type) {
+  bool match(Type *type, uint *g) {
     switch (opc) {
     case '*':
       if (PointerType *ptr = dynamic_cast<PointerType *>(type))
-        return operand->match(ptr->get_points_to());
+        return operand->match(ptr->get_points_to(), g);
       else
         return false;
     case '&':
-      return operand->match(type->ptr());
+      return operand->match(type->ptr(), g);
     case T_UNSIGNED:
       if (NumType *num = dynamic_cast<NumType *>(type))
         return num->is_signed == false &&
-               operand->match(new NumType(num->bits, num->is_floating, true));
+               operand->match(new NumType(num->bits, num->is_floating, true),
+                              g);
       else
         return false;
     case T_SIGNED:
       if (NumType *num = dynamic_cast<NumType *>(type))
         return num->is_signed &&
-               operand->match(new NumType(num->bits, num->is_floating, true));
+               operand->match(new NumType(num->bits, num->is_floating, true),
+                              g);
       else
         return false;
     }
@@ -141,14 +143,14 @@ public:
         return false;
     return return_type->eq(f->return_type);
   }
-  bool match(Type *type) {
+  bool match(Type *type, uint *g) {
     if (FunctionType *f = dynamic_cast<FunctionType *>(type)) {
       if (args.size() != f->arguments.size() || vararg != f->vararg)
         return false;
       for (size_t i = 0; i < args.size(); i++)
-        if (!args[i]->match(f->arguments[i]))
+        if (!args[i]->match(f->arguments[i], g))
           return false;
-      return return_type->match(f->return_type);
+      return return_type->match(f->return_type, g);
     }
     return false;
   }
@@ -171,9 +173,9 @@ public:
       return elem->eq(a->elem) && count == a->count;
     return false;
   }
-  bool match(Type *type) {
+  bool match(Type *type, uint *g) {
     if (ArrayType *a = dynamic_cast<ArrayType *>(type))
-      return this->elem->match(a->elem) && count == a->count;
+      return this->elem->match(a->elem, g) && count == a->count;
     return false;
   }
   bool is_generic() { return elem->is_generic(); }
@@ -204,13 +206,13 @@ public:
         return false;
     return true;
   }
-  bool match(Type *type) {
+  bool match(Type *type, uint *g) {
     if (StructType *s = dynamic_cast<StructType *>(type)) {
       if (members.size() != s->fields.size())
         return false;
       for (size_t i = 0; i < members.size(); i++)
         if (members[i].first != s->fields[i].first ||
-            !members[i].second->match(s->fields[i].second))
+            !members[i].second->match(s->fields[i].second, g))
           return false;
       return true;
     }
@@ -245,12 +247,12 @@ public:
         return false;
     return true;
   }
-  bool match(Type *type) {
+  bool match(Type *type, uint *g) {
     if (TupleType *t = dynamic_cast<TupleType *>(type)) {
       if (types.size() != t->types.size())
         return false;
       for (size_t i = 0; i < types.size(); i++)
-        if (!types[i]->match(t->types[i]))
+        if (!types[i]->match(t->types[i], g))
           return false;
       return true;
     }
@@ -277,7 +279,7 @@ public:
     NamedTypeAST *n = dynamic_cast<NamedTypeAST *>(other);
     return n && n->name == name;
   }
-  bool match(Type *type) { return this->type()->eq(type); }
+  bool match(Type *type, uint *g) { return this->type()->eq(type); }
   bool is_generic() { return false; }
 };
 
@@ -299,7 +301,7 @@ public:
     NamedTypeAST *n = dynamic_cast<NamedTypeAST *>(other);
     return n && n->name == name;
   }
-  bool match(Type *type) { return this->type()->eq(type); }
+  bool match(Type *type, uint *g) { return this->type()->eq(type); }
   bool is_generic() { return false; }
   std::string stringify() {
     std::stringstream ss;
@@ -320,7 +322,7 @@ public:
   TypeofAST(ExprAST *expr) : expr(expr) {}
   Type *type() { return expr->get_type(); }
   bool eq(TypeAST *other) { return type()->eq(other->type()); }
-  bool match(Type *type) { return this->type()->eq(type); }
+  bool match(Type *type, uint *g) { return this->type()->eq(type); }
   bool is_generic() { return false; }
 };
 
@@ -333,8 +335,10 @@ public:
     GenericTypeAST *g = dynamic_cast<GenericTypeAST *>(other);
     return g && name == g->name;
   }
-  bool match(Type *type) {
+  bool match(Type *type, uint *generic_count) {
     curr_named_types[name] = type;
+    if (generic_count)
+      (*generic_count) += 1;
     return true;
   }
   bool is_generic() { return true; }

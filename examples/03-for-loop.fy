@@ -3,10 +3,9 @@ include "std/string"
 
 fun main() {
 	const str = "Hello World!"
-	const len = str.length()
-	for (let i = 0; i < len; i += 1)
-		printc(str[i])
-	else // else runs if the first check of i<len fails.
-		prints("`str` is empty!")
+	for (let i = 0; i < str.length; i += 1)
+		print(str[i])
+	else // else runs if the first check of i<str.length fails.
+		print("`str` is empty!")
 	0
 }

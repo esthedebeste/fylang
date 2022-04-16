@@ -1,6 +1,6 @@
 include "std/io"
 
 fun main() {
-	prints("Hello World!")
+	print("Hello World!")
 	0
 }

@@ -35,6 +35,7 @@ enum Token : const int {
   T_CONST,         // const
   T_STRUCT,        // struct
   T_NEW,           // new
+  T_CREATE,        // create
   T_EQEQ,          // ==
   T_LEQ,           // <=
   T_GEQ,           // >=
@@ -106,6 +107,7 @@ static std::unordered_map<Token, std::string> token_strs = {
     {T_CONST, "const"},
     {T_STRUCT, "struct"},
     {T_NEW, "new"},
+    {T_CREATE, "create"},
     {T_EQEQ, "=="},
     {T_LEQ, "<="},
     {T_GEQ, ">="},
@@ -145,6 +147,7 @@ static std::unordered_map<std::string, Token> keywords = {
     {"const", T_CONST},
     {"struct", T_STRUCT},
     {"new", T_NEW},
+    {"create", T_CREATE},
     {"include", T_INCLUDE},
     {"type", T_TYPE},
     {"unsigned", T_UNSIGNED},

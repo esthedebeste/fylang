@@ -12,17 +12,14 @@ fun(uint64) print() printf("%lu", this)
 fun(uint128) print() printf("%llu", this)
 fun(float64) print() printf("%f", this)
 fun(float32) print() (this as float64).print()
+fun(typeof "") print() print(this.chars)
 
-fun printc(ch: char) 	ch.print()
+fun printc(ch: char)	ch.print()
 fun prints(str: char[])	str.print()
 fun printd(x: double)	x.print()
 fun printn(i: int)		i.print()
 
 fun print(x: generic X) x.print()
 
-include "string.fy"
-fun(*String) print_to(stream: *FILE)
+fun(typeof "") print_to(stream: *FILE)
 	fwrite(this.chars, 1, this.length, stream)
-
-fun(*String) print()
-	this.print_to(stderr)

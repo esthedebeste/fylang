@@ -4,13 +4,12 @@ include "std/string"
 
 fun main() {
 	const str = "Hello World!"
-	const len = str.length()
 	let i = 0
-	while (i < len) {
-		printc(str[i])
+	while (i < str.length) {
+		print(str[i])
 		i += 1
 	}
-	else // else runs if the first check of i<len fails.
-		prints("`str` is empty!")
+	else // else runs if the first check of i<str.length fails.
+		print("`str` is empty!")
 	0
 }

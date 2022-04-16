@@ -287,10 +287,12 @@ static ExprAST *parse_for_expr() {
   }
   return new ForExprAST(init, cond, body, post, elze);
 }
-/// newexpr ::= 'new' type '{' (identifier '=' expr ',')* '}'
+/// newexpr ::= 'new|create' type '{' (identifier '=' expr ',')* '}'
 static ExprAST *parse_new_expr() {
-  eat(T_NEW);
-  if (curr_token == '(') {
+  bool is_new = curr_token == T_NEW;
+  eat(is_new ? T_NEW : T_CREATE);
+
+  if (is_new && curr_token == '(') {
     // tuple on heap
     TupleExprAST *tuple = dynamic_cast<TupleExprAST *>(parse_paren_expr());
     if (tuple == nullptr)
@@ -314,7 +316,7 @@ static ExprAST *parse_new_expr() {
     }
   eat('}');
 
-  return new NewExprAST(type, fields);
+  return new NewExprAST(type, fields, is_new);
 }
 
 static ExprAST *parse_block() {
@@ -414,6 +416,7 @@ static ExprAST *parse_primary() {
   case T_LET:
   case T_CONST:
     return parse_let_expr();
+  case T_CREATE:
   case T_NEW:
     return parse_new_expr();
   case T_TRUE:

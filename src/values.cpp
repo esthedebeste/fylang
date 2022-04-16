@@ -127,9 +127,10 @@ LLVMValueRef gen_ptr_cast(LLVMValueRef value, PointerType *a, Type *b) {
 LLVMValueRef gen_arr_cast(Value *value, ArrayType *a, Type *b) {
   if (PointerType *ptr = dynamic_cast<PointerType *>(b)) {
     if (ptr->get_points_to()->neq(a->get_elem_type()))
-      error("Array can't be casted to pointer with different type, " +
-            ptr->get_points_to()->stringify() + " does not match " +
-            a->get_elem_type()->stringify() + ". ");
+      error("Array can't be casted to pointer with different type, "
+            << a->get_elem_type()->stringify() << "[" << a->count
+            << "] can't be casted to *" << ptr->get_points_to()->stringify()
+            << ".");
     LLVMValueRef zeros[2] = {
         LLVMConstInt(NumType(false).llvm_type(), 0, false),
         LLVMConstInt(NumType(false).llvm_type(), 0, false)};
@@ -141,6 +142,17 @@ LLVMValueRef gen_arr_cast(Value *value, ArrayType *a, Type *b) {
   error("Arrays can't be casted to non-pointers yet");
 }
 
+LLVMValueRef gen_str_cast(Value *string_value, Type *to) {
+  if (PointerType *ptr = dynamic_cast<PointerType *>(to)) {
+    if (NumType(8, false, false).neq(ptr->get_points_to()))
+      error("String can't be casted to " << ptr->stringify() << ".");
+    LLVMValueRef str = string_value->gen_val();
+    LLVMValueRef chars = LLVMBuildExtractValue(curr_builder, str, 0, UN);
+    return chars;
+  }
+  error("Strings can only be casted to *char.");
+}
+
 LLVMValueRef cast(Value *source, Type *to) {
   Type *src = source->get_type();
   if (src->eq(to))
@@ -150,6 +162,8 @@ LLVMValueRef cast(Value *source, Type *to) {
     return gen_num_cast(source->gen_val(), num, to);
   if (PointerType *ptr = dynamic_cast<PointerType *>(src))
     return gen_ptr_cast(source->gen_val(), ptr, to);
+  if (StringType *str = dynamic_cast<StringType *>(src))
+    return gen_str_cast(source, to);
   if (ArrayType *tup = dynamic_cast<ArrayType *>(src))
     return gen_arr_cast(source, tup, to);
   error("Invalid cast from " + src->stringify() + " to " + to->stringify());

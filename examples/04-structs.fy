@@ -1,15 +1,16 @@
 include "std/io"
+include "c/stdlib"
 
 struct String {
-	pointer: *char,
+	chars: char[],
 	length: unsigned int
 }
 fun print_to_stdout(str: *String)
 	for(let i = 0; i < str.length; i += 1)
-		printc(str.pointer[i])
+		print(str.chars[i])
 
 fun main() {
-	const str: *String = new String { pointer = "Hello from structs.fy!", length = 22 }
+	const str: *String = new String { chars = "Hello from structs.fy!", length = 22 }
 	print_to_stdout(str)
 	0
 }

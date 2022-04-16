@@ -45,14 +45,14 @@ fun(*Array<generic T>) at(index: int_ptrsize): T {
 }
 
 fun(*Array<generic T>) map(func: *fun(T, uint_ptrsize): T): *Array<T> {
-	const arr = new Array<T> { ptr = calloc(this.length, sizeof T), length = this.length, allocated = this.length }
+	const arr = new Array<T> { ptr = malloc(this.length * sizeof T), length = this.length, allocated = this.length }
 	for(let i = 0; i < this.length; i += 1)
 		arr.ptr[i] = func(this.ptr[i], i)
 	arr
 }
 
 fun(*Array<generic T>) filter(predicate: *fun(T, uint_ptrsize): bool): *Array<T> {
-	const arr = new Array<T> { ptr = calloc(this.length, sizeof T), length = 0, allocated = this.length }
+	const arr = new Array<T> { ptr = malloc(this.length * sizeof T), length = 0, allocated = this.length }
 	for(let i = 0; i < this.length; i += 1)
 		if(predicate(this.ptr[i], i))
 			arr.push(this.ptr[i])

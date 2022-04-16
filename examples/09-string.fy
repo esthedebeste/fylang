@@ -2,9 +2,9 @@ include "std/string"
 include "std/io"
 
 fun main() {
-	let a = create_string("Hello ")
-	let b = create_string("World!")
-	let hw = a.concat(b).lowercase()
-	hw.print()
+	const a = "Hello "
+	const b = "World!"
+	const hw = a.concat(b).lowercase()
+	print(hw)
 	0
 }

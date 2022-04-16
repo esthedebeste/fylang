@@ -14,12 +14,11 @@ fun main(argc: int, argv: *char[]) {
 		return 1
 	}
 
-	const BUF_SIZE = 4096
-	const buffer = malloc(BUF_SIZE)
-	let read = fread(buffer, 1, BUF_SIZE, file)
+	let buffer: char[512]
+	let read = fread(&buffer, 1, 512, file)
 	while (read != 0) {
-		fwrite(buffer, 1, read, stdout)
-		read = fread(buffer, 1, BUF_SIZE, file)
+		fwrite(&buffer, 1, read, stdout)
+		read = fread(&buffer, 1, 512, file)
 	}
 	fclose(file)
 	0

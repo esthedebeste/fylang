@@ -174,33 +174,34 @@ public:
 
 /// LetExprAST - Expression class for creating a variable, like "let a = 3".
 class LetExprAST : public ExprAST {
-  void init() {
-    if (!type) {
-      if (value)
-        type = type_ast(value->get_type());
-      else
-        error("Untyped valueless variable " + id);
-    }
-    curr_scope->declare_variable(id, type->type());
-  }
 
 public:
   std::string id;
+  bool untyped;
   TypeAST *type;
   ExprAST *value;
   bool constant;
   LetExprAST(std::string id, TypeAST *type, ExprAST *value, bool constant)
-      : id(id), type(type), value(value), constant(constant) {}
+      : id(id), type(type), value(value), constant(constant),
+        untyped(type == nullptr) {}
   Type *get_type() {
-    init();
-    return type->type();
+    Type *type;
+    if (untyped) {
+      if (value)
+        type = value->get_type();
+      else
+        error("Untyped valueless variable " + id);
+    } else
+      type = this->type->type();
+    curr_scope->declare_variable(id, type);
+    return type;
   }
   LLVMValueRef gen_toplevel() {
-    init();
+    Type *type = get_type();
     LLVMValueRef ptr =
         LLVMAddGlobal(curr_module, type->llvm_type(), id.c_str());
     if (value) {
-      LLVMValueRef val = value->gen_value()->gen_val();
+      LLVMValueRef val = value->gen_value()->cast_to(type)->gen_val();
       if (LLVMIsAConstant(val))
         LLVMSetInitializer(ptr, val);
       else
@@ -208,14 +209,14 @@ public:
     }
     if (constant)
       LLVMSetGlobalConstant(ptr, true);
-    curr_scope->set_variable(id, new BasicLoadValue(ptr, type->type()));
+    curr_scope->set_variable(id, new BasicLoadValue(ptr, type));
     return ptr;
   }
   Value *gen_value() {
-    init();
+    Type *type = get_type();
     if (constant) {
       if (value) {
-        NamedValue *val = new NamedValue(value->gen_value(), id);
+        NamedValue *val = new NamedValue(value->gen_value()->cast_to(type), id);
         curr_scope->set_variable(id, val);
         return val;
       } else
@@ -225,19 +226,18 @@ public:
         LLVMBuildAlloca(curr_builder, type->llvm_type(), id.c_str());
     LLVMSetValueName2(ptr, id.c_str(), id.size());
     if (value) {
-      LLVMValueRef llvm_val =
-          value->gen_value()->cast_to(type->type())->gen_val();
+      LLVMValueRef llvm_val = value->gen_value()->cast_to(type)->gen_val();
       LLVMBuildStore(curr_builder, llvm_val, ptr);
     }
-    BasicLoadValue *val = new BasicLoadValue(ptr, type->type());
+    BasicLoadValue *val = new BasicLoadValue(ptr, type);
     curr_scope->set_variable(id, val);
     return val;
   }
   LLVMValueRef gen_declare() {
-    init();
+    Type *type = get_type();
     LLVMValueRef global =
         LLVMAddGlobal(curr_module, type->llvm_type(), id.c_str());
-    curr_scope->set_variable(id, new BasicLoadValue(global, type->type()));
+    curr_scope->set_variable(id, new BasicLoadValue(global, type));
     return global;
   }
 };
@@ -259,7 +259,7 @@ public:
   }
 };
 
-PointerType *string_type;
+StringType *string_type;
 /// StringExprAST - Expression class for multiple chars ("hello")
 class StringExprAST : public ExprAST {
   std::string str;
@@ -267,10 +267,8 @@ class StringExprAST : public ExprAST {
 
 public:
   StringExprAST(std::string str) : str(str) {
-    if (!char_type)
-      char_type = new NumType(8, false, false);
     if (!string_type)
-      string_type = char_type->ptr();
+      string_type = new StringType();
     t_type = new ArrayType(char_type, str.size() + 1 /* zero-byte */);
   }
   Type *get_type() { return string_type; }
@@ -280,12 +278,17 @@ public:
     LLVMSetInitializer(glob, data);
     LLVMSetLinkage(glob, LLVMInternalLinkage);
     LLVMSetUnnamedAddress(glob, LLVMGlobalUnnamedAddr);
-    LLVMValueRef zeros[2] = {
-        LLVMConstInt(NumType(false).llvm_type(), 0, false),
-        LLVMConstInt(NumType(false).llvm_type(), 0, false)};
     // cast [ ... x i8 ]* to i8*
-    LLVMValueRef cast = LLVMConstGEP2(t_type->llvm_type(), glob, zeros, 2);
-    return new ConstValue(string_type, cast);
+    LLVMValueRef char_ptr = LLVMConstGEP2(
+        t_type->llvm_type(), glob,
+        (LLVMValueRef[]){LLVMConstInt(NumType(false).llvm_type(), 0, false),
+                         LLVMConstInt(NumType(false).llvm_type(), 0, false)},
+        2);
+    LLVMValueRef string = LLVMConstStruct(
+        (LLVMValueRef[]){char_ptr, LLVMConstInt(NumType(false).llvm_type(),
+                                                str.size(), false)},
+        2, true);
+    return new ConstValue(string_type, string);
   }
 };
 
@@ -616,6 +619,8 @@ public:
       return p_type->get_points_to();
     else if (ArrayType *arr_type = dynamic_cast<ArrayType *>(base_type))
       return arr_type->get_elem_type();
+    else if (base_type->type_type() == String)
+      return new NumType(8, false, false);
     else
       error("Invalid index, type not arrayish.\n"
             "Expected: array | pointer \nGot: " +
@@ -624,11 +629,13 @@ public:
 
   Value *gen_value() {
     Type *type = get_type();
+    LLVMValueRef val = value->gen_value()->gen_val();
+    if (value->get_type()->type_type() == String)
+      val = LLVMBuildExtractValue(curr_builder, val, 0, UN); // get char ptr
     LLVMValueRef index_v = index->gen_value()->gen_val();
-    return new BasicLoadValue(LLVMBuildGEP2(curr_builder, type->llvm_type(),
-                                            value->gen_value()->gen_val(),
-                                            &index_v, 1, "indextmp"),
-                              type);
+    return new BasicLoadValue(
+        LLVMBuildGEP2(curr_builder, type->llvm_type(), val, &index_v, 1, UN),
+        type);
   }
 };
 
@@ -711,6 +718,9 @@ public:
   Value *gen_value() {
     init();
     Value *src = source->gen_value();
+    if (!is_ptr && !src->has_ptr())
+      return new ConstValue(
+          type, LLVMBuildExtractValue(curr_builder, src->gen_val(), index, UN));
     // If src is a struct-pointer (*String) then access on the value, if src
     // is a struct-value (String) then access on the pointer to where it's
     // stored.
@@ -773,17 +783,20 @@ class NewExprAST : public ExprAST {
 public:
   TypeAST *s_type;
   std::vector<std::pair<std::string, ExprAST *>> fields;
+  bool is_new;
   NewExprAST(TypeAST *s_type,
-             std::vector<std::pair<std::string, ExprAST *>> fields)
-      : s_type(s_type), fields(fields) {}
-  Type *get_type() { return s_type->type()->ptr(); }
+             std::vector<std::pair<std::string, ExprAST *>> fields, bool is_new)
+      : s_type(s_type), fields(fields), is_new(is_new) {}
+  Type *get_type() { return is_new ? s_type->type()->ptr() : s_type->type(); }
 
   Value *gen_value() {
     StructType *st = dynamic_cast<StructType *>(s_type->type());
     if (!st)
       error("Cannot create instance of non-struct type " +
             s_type->type()->stringify());
-    LLVMValueRef ptr = build_malloc(st)->gen_val();
+    LLVMValueRef ptr = is_new
+                           ? build_malloc(st)->gen_val()
+                           : LLVMBuildAlloca(curr_builder, st->llvm_type(), UN);
     for (size_t i = 0; i < fields.size(); i++) {
       auto &[key, value] = fields[i];
       LLVMValueRef set_ptr = LLVMBuildStructGEP2(
@@ -793,7 +806,10 @@ public:
           value->gen_value()->cast_to(st->get_elem_type(i))->gen_val(),
           set_ptr);
     }
-    return new ConstValue(st->ptr(), ptr);
+    if (is_new)
+      return new ConstValue(s_type->type()->ptr(), ptr);
+    else
+      return new BasicLoadValue(ptr, s_type->type());
   }
 };
 

@@ -3,7 +3,16 @@
 
 static LLVMTypeRef void_type = LLVMStructType(nullptr, 0, true);
 
-enum TypeType : int { Void, Number, Pointer, Function, Array, Struct, Tuple };
+enum TypeType : int {
+  Void,
+  Number,
+  Pointer,
+  Function,
+  Array,
+  Struct,
+  Tuple,
+  String
+};
 static std::string tt_to_str(TypeType tt) {
   switch (tt) {
   case Void:
@@ -20,6 +29,8 @@ static std::string tt_to_str(TypeType tt) {
     return "struct";
   case Tuple:
     return "tuple";
+  case String:
+    return "string";
   }
 };
 class PointerType;
@@ -169,7 +180,7 @@ public:
       ArrayType *other_arr = dynamic_cast<ArrayType *>(other);
       return other_arr->elem->eq(this->elem) && other_arr->count >= this->count;
     } else if (PointerType *other_ptr = dynamic_cast<PointerType *>(other))
-      return other_ptr->points_to->eq(this->elem);
+      return PointerType(this->elem).castable_to(other_ptr);
     return false;
   }
   std::string stringify() {
@@ -260,6 +271,8 @@ public:
     return false;
   }
   bool castable_to(Type *other) {
+    if (TupleType::castable_to(other))
+      return true;
     if (StructType *other_s = dynamic_cast<StructType *>(other))
       if (other_s->name != this->name)
         return false;
@@ -324,4 +337,20 @@ template <> struct std::equal_to<FunctionType *> {
   size_t operator()(FunctionType *a, FunctionType *b) const noexcept {
     return a->eq(b);
   }
+};
+class StringType : public StructType {
+public:
+  StringType()
+      : StructType("String",
+                   {{"chars", new PointerType(new NumType(8, false, false))},
+                    {"length", new NumType(false)}}) {}
+  TypeType type_type() { return TypeType::String; }
+  bool eq(Type *other) { return other->type_type() == TypeType::String; }
+  bool castable_to(Type *other) {
+    if (PointerType *other_ptr = dynamic_cast<PointerType *>(other))
+      return other_ptr->get_points_to()->eq(new NumType(8, false, false));
+    return other->type_type() == TypeType::String;
+  }
+  std::string stringify() { return "String"; }
+  size_t _hash() { return hash(TypeType::String); }
 };
