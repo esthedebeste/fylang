@@ -14,7 +14,7 @@ fun(float64) print_to(s: *FILE) fprintf(s, "%f", this)
 fun(float32) print_to(s: *FILE) (this as float64).print()
 fun(typeof "") print_to(s: *FILE) fwrite(this.chars, 1, this.length, s)
 
-fun(generic X) print(): uint_ptrsize this.print_to(stdout())
+fun(generic X) print():  uint_ptrsize this.print_to(stdout)
 fun print(x: generic X): uint_ptrsize x.print()
 
 fun printc(ch: char)	ch.print()

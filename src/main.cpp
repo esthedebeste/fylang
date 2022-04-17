@@ -139,6 +139,8 @@ int main(int argc, char **argv, char **envp) {
           : nullptr;
   if (!getenv("NO_UCR") && main_function)
     remove_unused_globals(curr_module, main_function);
+  if (main_function)
+    add_stores_before_main(main_function);
   if (mode == COMPILE) {
     std::string out = argv[3];
     size_t ext_pos = out.rfind('.');

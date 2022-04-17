@@ -28,6 +28,7 @@ void mark_used_globals(LLVMValueRef entry) {
       mark_used_globals(LLVMGetOperand(entry, i));
 }
 
+std::unordered_set<LLVMValueRef> removed_globals;
 inline void loop_and_delete(LLVMModuleRef module,
                             LLVMValueRef (*first)(LLVMModuleRef mod),
                             LLVMValueRef (*next)(LLVMValueRef last),
@@ -38,6 +39,7 @@ inline void loop_and_delete(LLVMModuleRef module,
     if (!is_global_used(curr)) {
       debug_log("Removing " << LLVMGetValueName(curr));
       remove(curr);
+      removed_globals.insert(curr);
     }
     curr = nxt;
   }
@@ -47,6 +49,7 @@ inline void loop_and_delete(LLVMModuleRef module,
 // (often `fun main`)
 void remove_unused_globals(LLVMModuleRef module, LLVMValueRef entryPoint) {
   used_globals.clear();
+  removed_globals.clear();
   mark_used_globals(entryPoint);
   loop_and_delete(module, LLVMGetLastGlobal, LLVMGetPreviousGlobal,
                   LLVMDeleteGlobal);

@@ -4,12 +4,12 @@
 #include <iostream>
 #include <limits.h>
 #include <math.h>
-#include <set>
 #include <sstream>
 #include <stdlib.h>
 #include <string.h>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 extern "C" {
 #include "llvm-c-14/llvm-c/BitWriter.h"
@@ -167,5 +167,6 @@ static std::unordered_map<std::string, Token> keywords = {
     {"generic", T_GENERIC},
 };
 
-static std::set<int> unaries = {'!', '*', '&', '+', '-', T_RETURN};
-static std::set<int> type_unaries = {'*', '&', T_UNSIGNED, T_SIGNED, T_GENERIC};
+static std::unordered_set<int> unaries = {'!', '*', '&', '+', '-', T_RETURN};
+static std::unordered_set<int> type_unaries = {'*', '&', T_UNSIGNED, T_SIGNED,
+                                               T_GENERIC};

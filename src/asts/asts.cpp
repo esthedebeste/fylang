@@ -8,6 +8,7 @@ public:
   virtual ~ExprAST() {}
   virtual Type *get_type() = 0;
   virtual Value *gen_value() = 0;
+  virtual bool is_constant() { return false; }
 };
 
 struct Scope {
@@ -37,7 +38,6 @@ static FunctionType *curr_func_type;
 
 #include "functions.cpp"
 #include "types.cpp"
-
 NumType *sizeof_type;
 /// SizeofExprAST - Expression class to get the byte size of a type
 class SizeofExprAST : public ExprAST {
@@ -51,6 +51,7 @@ public:
   Value *gen_value() {
     return new ConstValue(sizeof_type, LLVMSizeOf(type->llvm_type()));
   }
+  bool is_constant() { return true; }
 };
 inline Value *build_malloc(Type *type) {
   if (!curr_named_functions.count("malloc"))
@@ -119,6 +120,7 @@ public:
                                         val.size(), base);
     return new ConstValue(type, num);
   }
+  bool is_constant() { return true; }
 };
 Type *bool_type;
 /// BoolExprAST - Expression class for boolean literals (true or false).
@@ -136,6 +138,7 @@ public:
                           value ? LLVMConstAllOnes(bool_type->llvm_type())
                                 : LLVMConstNull(bool_type->llvm_type()));
   }
+  bool is_constant() { return true; }
 };
 
 class CastExprAST : public ExprAST {
@@ -146,6 +149,7 @@ public:
   CastExprAST(ExprAST *value, TypeAST *to) : value(value), to(to) {}
   Type *get_type() { return to->type(); }
   Value *gen_value() { return value->gen_value()->cast_to(to->type()); }
+  bool is_constant() { return value->is_constant(); }
 };
 
 /// VariableExprAST - Expression class for referencing a variable, like "a".
@@ -171,6 +175,24 @@ public:
       error("Variable '" + name + "' doesn't exist.");
   }
 };
+
+std::vector<std::pair<LLVMValueRef, ExprAST *>> inits;
+void add_store_before_main(LLVMValueRef ptr, ExprAST *val) {
+  inits.push_back({ptr, val});
+}
+extern std::unordered_set<LLVMValueRef> removed_globals; // defined in UCR
+void add_stores_before_main(LLVMValueRef main_func) {
+  LLVMBasicBlockRef entry = LLVMGetEntryBasicBlock(main_func);
+  LLVMBasicBlockRef store_block =
+      LLVMAppendBasicBlock(main_func, "global_vars");
+  LLVMMoveBasicBlockBefore(store_block, entry);
+  LLVMPositionBuilderAtEnd(curr_builder, store_block);
+  for (auto &[ptr, val] : inits)
+    // UCR can remove globals, so we need to check if the global still exists
+    if (removed_globals.count(ptr) == 0)
+      LLVMBuildStore(curr_builder, val->gen_value()->gen_val(), ptr);
+  LLVMBuildBr(curr_builder, entry);
+}
 
 /// LetExprAST - Expression class for creating a variable, like "let a = 3".
 class LetExprAST : public ExprAST {
@@ -201,11 +223,12 @@ public:
     LLVMValueRef ptr =
         LLVMAddGlobal(curr_module, type->llvm_type(), id.c_str());
     if (value) {
-      LLVMValueRef val = value->gen_value()->cast_to(type)->gen_val();
-      if (LLVMIsAConstant(val))
-        LLVMSetInitializer(ptr, val);
-      else
-        error("Global variable needs a constant value inside it");
+      if (value->is_constant())
+        LLVMSetInitializer(ptr, value->gen_value()->cast_to(type)->gen_val());
+      else {
+        LLVMSetInitializer(ptr, LLVMConstNull(type->llvm_type()));
+        add_store_before_main(ptr, new CastExprAST(value, type_ast(type)));
+      }
     }
     if (constant)
       LLVMSetGlobalConstant(ptr, true);
@@ -257,6 +280,7 @@ public:
     return new ConstValue(char_type,
                           LLVMConstInt(char_type->llvm_type(), charr, false));
   }
+  bool is_constant() { return true; }
 };
 
 StringType *string_type;
@@ -288,6 +312,7 @@ public:
     LLVMValueRef string = LLVMConstStruct(string_values, 2, true);
     return new ConstValue(string_type, string);
   }
+  bool is_constant() { return true; }
 };
 
 LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
@@ -819,6 +844,13 @@ public:
   }
 
   Value *gen_value() {
+    if (is_constant()) {
+      LLVMValueRef vals[values.size()];
+      for (size_t i = 0; i < values.size(); i++)
+        vals[i] = values[i]->gen_value()->gen_val();
+      return new ConstValue(get_type(),
+                            LLVMConstStruct(vals, values.size(), true));
+    }
     Type *type = get_type();
     LLVMValueRef ptr = is_new
                            ? build_malloc(t_type)->gen_val()
@@ -833,6 +865,14 @@ public:
       return new ConstValue(type, ptr);
     else
       return new BasicLoadValue(ptr, type);
+  }
+  bool is_constant() {
+    if (is_new)
+      return false;
+    for (auto &value : values)
+      if (!value->is_constant())
+        return false;
+    return true;
   }
 };
 
@@ -873,6 +913,7 @@ public:
   Value *gen_value() {
     return new ConstValue(type, LLVMConstNull(type->llvm_type()));
   }
+  bool is_constant() { return true; }
 };
 
 class TypeAssertExprAST : public ExprAST {
@@ -915,6 +956,7 @@ public:
 
   Type *get_type() { return pick()->get_type(); }
   Value *gen_value() { return pick()->gen_value(); }
+  bool is_constant() { return pick()->is_constant(); }
 };
 
 /// IfExprAST - Expression class for if/then/else.
