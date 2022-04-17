@@ -181,18 +181,50 @@ public:
   bool is_generic() { return elem->is_generic(); }
 };
 
+class GenericArrayTypeAST : public TypeAST {
+public:
+  TypeAST *elem;
+  std::string count_name;
+  GenericArrayTypeAST(TypeAST *elem, std::string count_name)
+      : elem(elem), count_name(count_name) {}
+  Type *type() {
+    IntValue *count =
+        dynamic_cast<IntValue *>(curr_scope->get_named_variable(count_name));
+    if (count == nullptr)
+      error("Generic array not initialized properly, " << count_name
+                                                       << " is undefined.");
+    return new ArrayType(elem->type(), count->val);
+  }
+  bool eq(TypeAST *other) {
+    if (GenericArrayTypeAST *a = dynamic_cast<GenericArrayTypeAST *>(other))
+      return elem->eq(a->elem) && count_name == a->count_name;
+    return false;
+  }
+  bool match(Type *type, uint *generic_count) {
+    if (ArrayType *a = dynamic_cast<ArrayType *>(type)) {
+      if (this->elem->match(a->elem, generic_count)) {
+        curr_scope->set_variable(
+            count_name, new IntValue(NumType(64, false, false), a->count));
+        if (generic_count)
+          (*generic_count) += 1;
+        return true;
+      }
+    }
+    return false;
+  }
+  bool is_generic() { return elem->is_generic(); }
+};
+
 class StructTypeAST : public TypeAST {
 public:
-  std::string name;
   std::vector<std::pair<std::string, TypeAST *>> members;
-  StructTypeAST(std::string name,
-                std::vector<std::pair<std::string, TypeAST *>> members)
-      : name(name), members(members) {}
+  StructTypeAST(std::vector<std::pair<std::string, TypeAST *>> members)
+      : members(members) {}
   Type *type() {
     std::vector<std::pair<std::string, Type *>> types;
     for (auto &m : members)
       types.push_back(std::make_pair(m.first, m.second->type()));
-    return new StructType(name, types);
+    return new StructType(types);
   }
   bool eq(TypeAST *other) {
     StructTypeAST *s = dynamic_cast<StructTypeAST *>(other);
@@ -223,6 +255,19 @@ public:
       if (m.second->is_generic())
         return true;
     return false;
+  }
+};
+class NamedStructTypeAST : public StructTypeAST {
+public:
+  std::string name;
+  NamedStructTypeAST(std::string name,
+                     std::vector<std::pair<std::string, TypeAST *>> members)
+      : name(name), StructTypeAST(members) {}
+  Type *type() {
+    std::vector<std::pair<std::string, Type *>> types;
+    for (auto &m : members)
+      types.push_back(std::make_pair(m.first, m.second->type()));
+    return new NamedStructType(name, types);
   }
 };
 

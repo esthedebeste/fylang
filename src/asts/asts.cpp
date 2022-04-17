@@ -182,6 +182,8 @@ void add_store_before_main(LLVMValueRef ptr, ExprAST *val) {
 }
 extern std::unordered_set<LLVMValueRef> removed_globals; // defined in UCR
 void add_stores_before_main(LLVMValueRef main_func) {
+  if (inits.size() == 0)
+    return; // nothing to do
   LLVMBasicBlockRef entry = LLVMGetEntryBasicBlock(main_func);
   LLVMBasicBlockRef store_block =
       LLVMAppendBasicBlock(main_func, "global_vars");

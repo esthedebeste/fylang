@@ -102,12 +102,38 @@ static TypeDefAST *parse_type_definition() {
     return new AbsoluteTypeDefAST(name, t);
 }
 
+static TypeAST *parse_inline_struct_type(std::string first_name) {
+  // switched from parse_tuple_type after parsing the first key and seeing a ':'
+  std::vector<std::pair<std::string, TypeAST *>> fields;
+  eat(':');
+  auto first_type = parse_type();
+  fields.push_back(std::make_pair(first_name, first_type));
+  while (true) {
+    if (curr_token == '}')
+      break;
+    eat(',');
+    std::string name = identifier_string;
+    eat(T_IDENTIFIER);
+    eat(':');
+    TypeAST *t = parse_type();
+    fields.push_back(std::make_pair(name, t));
+  }
+  eat('}');
+  return new StructTypeAST(fields);
+}
 static TypeAST *parse_tuple_type() {
   eat('{');
   std::vector<TypeAST *> types;
   if (curr_token != '}')
     while (1) {
-      types.push_back(parse_type());
+      auto type = parse_type();
+      if (curr_token == ':') {
+        if (auto named = dynamic_cast<NamedTypeAST *>(type))
+          return parse_inline_struct_type(named->name);
+        else
+          error("Unexpected : in tuple type");
+      }
+      types.push_back(type);
       if (curr_token == '}')
         break;
       eat(',');
@@ -133,6 +159,12 @@ static TypeAST *parse_primary_type() {
   }
   case T_IDENTIFIER:
     return parse_num_type();
+  case T_GENERIC: {
+    eat(T_GENERIC);
+    std::string name = identifier_string;
+    eat(T_IDENTIFIER);
+    return new GenericTypeAST(name);
+  }
   }
   error("Unexpected token '" + token_to_str(curr_token) + "'");
 }
@@ -145,6 +177,12 @@ static TypeAST *parse_type_postfix() {
       if (curr_token == ']') {
         eat(']');
         prev = new UnaryTypeAST('*', prev);
+      } else if (curr_token == T_GENERIC) {
+        eat(T_GENERIC);
+        std::string name = identifier_string;
+        eat(T_IDENTIFIER);
+        eat(']');
+        prev = new GenericArrayTypeAST(prev, name);
       } else {
         std::string num = num_value;
         if (num_has_dot)
@@ -160,12 +198,6 @@ static TypeAST *parse_type_postfix() {
   }
 }
 static TypeAST *parse_type_unary() {
-  if (curr_token == T_GENERIC) {
-    eat(T_GENERIC);
-    std::string name = identifier_string;
-    eat(T_IDENTIFIER);
-    return new GenericTypeAST(name);
-  }
   // If the current token is not a unary type operator, just parse type
   if (type_unaries.count(curr_token) == 0)
     return parse_type_postfix();
@@ -668,10 +700,10 @@ static TypeDefAST *parse_struct() {
   eat('}');
   if (is_generic)
     return new GenericTypeDefAST(struct_name, generic_params,
-                                 new StructTypeAST(struct_name, members));
+                                 new StructTypeAST(members));
   else
     return new AbsoluteTypeDefAST(struct_name,
-                                  new StructTypeAST(struct_name, members));
+                                  new NamedStructTypeAST(struct_name, members));
 }
 
 /// include ::= 'include' string_expr

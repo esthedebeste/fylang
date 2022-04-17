@@ -1,5 +1,5 @@
 include "std/io"
-include "std/consts"
+include "std/file"
 
 fun main(argc: int, argv: *char[]) {
 	if (argc != 2) {
@@ -8,18 +8,20 @@ fun main(argc: int, argv: *char[]) {
 	}
 
 	const filename = argv[1]
-	const file = fopen(filename, "r")
-	if (file == NULLPTR) {
+	const res = open_file(filename, "r")
+	const err = res.err
+	const file = res.file
+	if (err) {
 		printf("Could not open file %s\n", filename)
 		return 1
 	}
 
 	let buffer: char[512]
-	let read = fread(&buffer, 1, 512, file)
-	while (read != 0) {
-		fwrite(&buffer, 1, read, stdout)
-		read = fread(&buffer, 1, 512, file)
+	let amount_read = file.read_into(&buffer)
+	while (amount_read != 0) {
+		stdout.write_buffer(&buffer, amount_read)
+		amount_read = file.read_into(&buffer)
 	}
-	fclose(file)
+	file.close()
 	0
 }

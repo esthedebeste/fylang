@@ -76,3 +76,7 @@ fun(String) ends_with(postfix: String): bool
 				return false
 		true
 	}
+
+fun(String) equals(other: String): bool
+	if (this.length != other.length) false
+	else streql(this.chars, other.chars, this.length)

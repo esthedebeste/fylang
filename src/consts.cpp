@@ -168,5 +168,4 @@ static std::unordered_map<std::string, Token> keywords = {
 };
 
 static std::unordered_set<int> unaries = {'!', '*', '&', '+', '-', T_RETURN};
-static std::unordered_set<int> type_unaries = {'*', '&', T_UNSIGNED, T_SIGNED,
-                                               T_GENERIC};
+static std::unordered_set<int> type_unaries = {'*', '&', T_UNSIGNED, T_SIGNED};

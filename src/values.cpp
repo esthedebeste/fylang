@@ -22,6 +22,17 @@ public:
   LLVMValueRef gen_ptr() { error("Const values can't be pointered"); };
   bool has_ptr() { return false; }
 };
+/// IntValue - Integer value.
+class IntValue : public Value {
+public:
+  uint64_t val;
+  NumType type;
+  IntValue(NumType type, uint64_t val) : type(type), val(val) {}
+  Type *get_type() { return &type; };
+  LLVMValueRef gen_val() { return LLVMConstInt(type.llvm_type(), val, false); };
+  LLVMValueRef gen_ptr() { error("Int values can't be pointered"); };
+  bool has_ptr() { return false; }
+};
 /// FuncValue - For functions
 class FuncValue : public Value {
 public:

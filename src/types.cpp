@@ -251,11 +251,9 @@ public:
 };
 class StructType : public TupleType {
 public:
-  std::string name;
   std::vector<std::pair<std::string, Type *>> fields;
-  StructType(std::string name,
-             std::vector<std::pair<std::string, Type *>> fields)
-      : name(name), fields(fields), TupleType(seconds(fields)) {}
+  StructType(std::vector<std::pair<std::string, Type *>> fields)
+      : fields(fields), TupleType(seconds(fields)) {}
   size_t get_index(std::string name) {
     for (size_t i = 0; i < fields.size(); i++)
       if (fields[i].first == name)
@@ -263,29 +261,31 @@ public:
     error("Struct does not have key " + name);
   }
   TypeType type_type() { return TypeType::Struct; }
-  bool eq(Type *other) {
-    if (TupleType::eq(other))
-      return true;
-    if (StructType *other_s = dynamic_cast<StructType *>(other))
-      // structs are unique
-      return this == other_s;
-    return false;
-  }
-  bool castable_to(Type *other) {
-    if (TupleType::castable_to(other))
-      return true;
-    if (StructType *other_s = dynamic_cast<StructType *>(other))
-      if (other_s->name != this->name)
-        return false;
-    return false;
-  }
-  std::string stringify() { return name; }
   size_t _hash() {
     size_t h = 0;
     for (auto f : fields)
       h ^= hash(f.first) ^ hash(f.second);
     return h ^ hash(fields.size()) ^ hash(TypeType::Struct);
   }
+  std::string stringify() {
+    std::stringstream res;
+    res << "{ ";
+    for (size_t i = 0; i < types.size(); i++) {
+      if (i != 0)
+        res << ", ";
+      res << fields[i].first << ": " << fields[i].second->stringify();
+    }
+    res << " }";
+    return res.str();
+  }
+};
+class NamedStructType : public StructType {
+public:
+  std::string name;
+  NamedStructType(std::string name,
+                  std::vector<std::pair<std::string, Type *>> fields)
+      : name(name), StructType(fields) {}
+  std::string stringify() { return name; }
 };
 class FunctionType : public Type {
 public:
@@ -339,12 +339,12 @@ template <> struct std::equal_to<FunctionType *> {
     return a->eq(b);
   }
 };
-class StringType : public StructType {
+class StringType : public NamedStructType {
 public:
   StringType()
-      : StructType("String",
-                   {{"chars", new PointerType(new NumType(8, false, false))},
-                    {"length", new NumType(false)}}) {}
+      : NamedStructType(
+            "String", {{"chars", new PointerType(new NumType(8, false, false))},
+                       {"length", new NumType(false)}}) {}
   TypeType type_type() { return TypeType::String; }
   bool eq(Type *other) { return other->type_type() == TypeType::String; }
   bool castable_to(Type *other) {
