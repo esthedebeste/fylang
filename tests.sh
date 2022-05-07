@@ -1,8 +1,8 @@
 dir=$(realpath --relative-to=. "$(dirname "$(readlink -f "$0")")")
-cmake --build ./build --config Release || exit $?
+cmake --build ./build --config Debug || exit $?
 function try {
   echo " - $file"
-  out=$(QUIET=1 $dir/build/fy $args)
+  out=$($dir/build/fy $args)
   exit=$?
   echo "$out"
   if [ "$exit" -ne 0 ]; then
@@ -31,6 +31,7 @@ for file in $dir/tests/*.fy $dir/tests/**/*.fy
 do
   file=${file##$dir/tests/}
   file=${file%.fy}
+  export QUIET=1
   args="run tests/$file.fy 2>&1"
   try
   # out=$(QUIET=1 $dir/build/fy run "tests/$file" 2>&1)

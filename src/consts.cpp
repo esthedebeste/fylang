@@ -66,6 +66,7 @@ enum Token : const int {
   T_DUMP,          // DUMP
   T_ASSERT_TYPE,   // ASSERT_TYPE
   T_GENERIC,       // generic
+  T_INLINE,        // inline
 };
 
 static LLVMContextRef curr_ctx;
@@ -138,6 +139,7 @@ static std::unordered_map<Token, std::string> token_strs = {
     {T_DUMP, "DUMP"},
     {T_ASSERT_TYPE, "ASSERT_TYPE"},
     {T_GENERIC, "generic"},
+    {T_INLINE, "inline"},
 };
 static std::unordered_map<std::string, Token> keywords = {
     {"if", T_IF},
@@ -165,6 +167,7 @@ static std::unordered_map<std::string, Token> keywords = {
     {"DUMP", T_DUMP},
     {"ASSERT_TYPE", T_ASSERT_TYPE},
     {"generic", T_GENERIC},
+    {"inline", T_INLINE},
 };
 
 static std::unordered_set<int> unaries = {'!', '*', '&', '+', '-', T_RETURN};

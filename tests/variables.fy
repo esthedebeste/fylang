@@ -1,7 +1,7 @@
 include "c/stdio"
 
 fun print(n: int)
-	printf("%d", n)
+	printf("%d"c, n)
 
 const a = 3
 let b = 4 + 1

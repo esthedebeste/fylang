@@ -3,7 +3,7 @@ include "c/stdio"
 struct Num { x: int }
 
 fun print(n: int)
-	printf("%d", n)
+	printf("%d"c, n)
 
 fun heap()
 	new Num { x = 1 }

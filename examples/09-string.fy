@@ -1,9 +1,9 @@
-include "std/string"
 include "std/io"
+include "std/string"
 
 fun main() {
-	const a = "Hello "
-	const b = "World!"
+	const a = str("Hello ")
+	const b = str("World!")
 	const hw = a.concat(b).lowercase()
 	print(hw)
 	0

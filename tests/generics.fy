@@ -1,29 +1,27 @@
 include "c/stdio"
+include "os/{os}/io"
+
 fun print(t: generic A)
-	if(type A == char[])
-		printf("%s", t)
+	if(type A == *char[generic Len])
+		fwrite(t, sizeof(char), Len, stdout)
 	else if(type A == int)
-		printf("%d", t)
-	else {
-		DUMP A
-		printf("Didn't know how to print t")
-	}
+		printf("%d"c, t)
 
 fun(generic A) print()
-	if(type A == char[])
-		printf("%s", this)
+	if(typeof(this) == *char[generic Len])
+		fwrite(this, sizeof(char), Len, stdout)
 	else
-		printf("Expected (int) print to override.")
+		puts("Expected (int) print to override."c)
 
 fun(int) print()
-	printf("%d", this)
+	printf("%d"c, this)
 
 fun main() {
-	const a: char[] = "hello "
+	let a = "hello "
 	const b = 1
-	print(a)
+	print(&a)
 	print(b)
-	a.print()
+	;(&a).print()
 	b.print()
 	0
 }

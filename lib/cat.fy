@@ -1,20 +1,19 @@
 include "std/io"
 include "std/file"
 
-fun main(argc: int, argv: *char[]) {
+fun main(argc: int, argv: **char) {
 	if (argc != 2) {
-		printf("Usage: %s <file>\n", argv[0])
+		print("Usage: ") print(argv[0]) print(" <file>\n")
 		return 1
 	}
 
 	const filename = argv[1]
-	const res = open_file(filename, "r")
-	const err = res.err
-	const file = res.file
-	if (err) {
-		printf("Could not open file %s\n", filename)
+	const res = open_file(filename, "r"c)
+	if (res.err) {
+		print("Could not open file ") print(filename)
 		return 1
 	}
+	const file = res.file
 
 	let buffer: char[512]
 	let amount_read = file.read_into(&buffer)

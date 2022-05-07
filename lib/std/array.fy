@@ -3,7 +3,7 @@ include "consts.fy"
 include "c/stdlib"
 
 struct Array<T> {
-	ptr: T[],
+	ptr: *T,
 	length: uint_ptrsize,
 	allocated: uint_ptrsize
 }
@@ -30,18 +30,20 @@ fun(*Array<generic T>) push(added: T): uint_ptrsize {
 	this.length += 1
 }
 
-fun(*Array<generic T>) set(index: uint_ptrsize, to: T): T
-	this.ptr[index] = to
+
+fun(*Array<generic T>) at_ptr(index: int_ptrsize): *T {
+	const i: int_ptrsize = if(index < 0) this.length as int_ptrsize + index else index
+	if(i < 0 || i >= this.length) NULLPTR as *T
+	else &this.ptr[i]
+}
+
+inline fun(*Array<generic T>) set(index: int_ptrsize, to: T): T
+	*this.at_ptr(index) = to
 
 fun(*Array<generic T>) at(index: int_ptrsize): T {
-	const i: int_ptrsize = if(index < 0) this.length as int_ptrsize + index else index
-	if(i < 0 || i >= this.length)
-		if(type T == *generic A)
-			NULLPTR as *A
-		else
-			0 as T
-	else
-		this.ptr[i]
+	const ptr = this.at_ptr(index)
+	if(ptr == (NULLPTR as *T)) if(type T == *generic A) { NULLPTR as *A } else { 0 as T }
+	else *ptr
 }
 
 fun(*Array<generic T>) map(func: *fun(T, uint_ptrsize): T): *Array<T> {

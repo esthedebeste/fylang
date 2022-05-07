@@ -2,6 +2,7 @@
 #include "../types.cpp"
 #include "../utils.cpp"
 #include "../values.cpp"
+
 /// ExprAST - Base class for all expression nodes.
 class ExprAST {
 public:
@@ -29,12 +30,10 @@ struct Scope {
     named_variables[name] = value;
   }
 };
-Scope *curr_scope = new Scope(nullptr); // global scope
+Scope *global_scope = new Scope(nullptr);
+Scope *curr_scope = global_scope;
 Scope *push_scope() { return curr_scope = new Scope(curr_scope); }
 Scope *pop_scope() { return curr_scope = curr_scope->parent_scope; }
-
-class TypeAST;
-static FunctionType *curr_func_type;
 
 #include "functions.cpp"
 #include "types.cpp"
@@ -63,62 +62,65 @@ inline Value *build_malloc(Type *type) {
                         "malloc_" + type->stringify());
 }
 
-NumType *num_char_to_type(char type_char, bool has_dot) {
+NumType num_char_to_type(char type_char, bool has_dot) {
   switch (type_char) {
   case 'd':
-    return new NumType(64, true, true);
+    return NumType(64, true, true);
   case 'f':
-    return new NumType(32, true, true);
+    return NumType(32, true, true);
   case 'i':
     if (has_dot)
       error("'i' (int32) type can't have a '.'");
-    return new NumType(32, false, true);
+    return NumType(32, false, true);
   case 'u':
     if (has_dot)
       error("'u' (uint32) type can't have a '.'");
-    return new NumType(32, false, false);
+    return NumType(32, false, false);
   case 'l':
     if (has_dot)
       error("'l' (long, int64) type can't have a '.'");
-    return new NumType(64, false, true);
+    return NumType(64, false, true);
   case 'b':
     if (has_dot)
       error("'b' (byte, uint8) type can't have a '.'");
-    return new NumType(8, false, false);
+    return NumType(8, false, false);
   default:
     error("Invalid number type id '" + std::string(1, type_char) + "'");
   }
 }
 /// NumberExprAST - Expression class for numeric literals like "1.0".
 class NumberExprAST : public ExprAST {
-  std::string val;
+  union {
+    long double floating;
+    unsigned long long integer;
+  } value;
   unsigned int base;
 
 public:
-  NumType *type;
+  NumType type;
   NumberExprAST(std::string val, char type_char, bool has_dot,
                 unsigned int base)
-      : val(val), base(base) {
-    type = num_char_to_type(type_char, has_dot);
+      : base(base), type(num_char_to_type(type_char, has_dot)) {
+    if (type.is_floating)
+      value.floating = std::stold(val);
+    else
+      value.integer = std::stoull(val, nullptr, base);
   }
-  NumberExprAST(unsigned int val, char type_char) : base(10) {
-    type = num_char_to_type(type_char, false);
-    this->val = std::to_string(val);
+  NumberExprAST(unsigned long long val, char type_char)
+      : base(10), type(num_char_to_type(type_char, false)) {
+    value.integer = val;
   }
-  Type *get_type() { return type; }
+  Type *get_type() { return &type; }
   Value *gen_value() {
-    LLVMValueRef num;
-    if (type->is_floating)
+    if (type.is_floating)
       if (base != 10) {
         error("floating-point numbers with a base that isn't decimal aren't "
               "supported.");
       } else
-        num = LLVMConstRealOfStringAndSize(type->llvm_type(), val.c_str(),
-                                           val.size());
+        return new ConstValue(&type,
+                              LLVMConstReal(type.llvm_type(), value.floating));
     else
-      num = LLVMConstIntOfStringAndSize(type->llvm_type(), val.c_str(),
-                                        val.size(), base);
-    return new ConstValue(type, num);
+      return new IntValue(type, value.integer);
   }
   bool is_constant() { return true; }
 };
@@ -234,7 +236,7 @@ public:
     }
     if (constant)
       LLVMSetGlobalConstant(ptr, true);
-    curr_scope->set_variable(id, new BasicLoadValue(ptr, type));
+    curr_scope->set_variable(id, new BasicLoadValue(type, ptr));
     return ptr;
   }
   Value *gen_value() {
@@ -254,7 +256,7 @@ public:
       LLVMValueRef llvm_val = value->gen_value()->cast_to(type)->gen_val();
       LLVMBuildStore(curr_builder, llvm_val, ptr);
     }
-    BasicLoadValue *val = new BasicLoadValue(ptr, type);
+    BasicLoadValue *val = new BasicLoadValue(type, ptr);
     curr_scope->set_variable(id, val);
     return val;
   }
@@ -262,12 +264,12 @@ public:
     Type *type = get_type();
     LLVMValueRef global =
         LLVMAddGlobal(curr_module, type->llvm_type(), id.c_str());
-    curr_scope->set_variable(id, new BasicLoadValue(global, type));
+    curr_scope->set_variable(id, new BasicLoadValue(type, global));
     return global;
   }
 };
 
-static Type *char_type;
+static NumType *char_type;
 /// CharExprAST - Expression class for a single char ('a')
 class CharExprAST : public ExprAST {
   char charr;
@@ -285,44 +287,50 @@ public:
   bool is_constant() { return true; }
 };
 
-StringType *string_type;
 /// StringExprAST - Expression class for multiple chars ("hello")
 class StringExprAST : public ExprAST {
-  std::string str;
   ArrayType *t_type;
 
 public:
+  std::string str;
   StringExprAST(std::string str) : str(str) {
-    if (!string_type)
-      string_type = new StringType();
-    t_type = new ArrayType(char_type, str.size() + 1 /* zero-byte */);
+    t_type = new ArrayType(char_type, str.size());
   }
-  Type *get_type() { return string_type; }
+  Type *get_type() { return t_type; }
   Value *gen_value() {
-    LLVMValueRef data = LLVMConstString(str.c_str(), str.size(), false);
-    LLVMValueRef glob = LLVMAddGlobal(curr_module, t_type->llvm_type(), ".str");
-    LLVMSetInitializer(glob, data);
-    LLVMSetLinkage(glob, LLVMInternalLinkage);
-    LLVMSetUnnamedAddress(glob, LLVMGlobalUnnamedAddr);
-    LLVMValueRef zeros[2] = {
-        LLVMConstInt(NumType(false).llvm_type(), 0, false),
-        LLVMConstInt(NumType(false).llvm_type(), 0, false)};
-    // cast [ ... x i8 ]* to i8*
-    LLVMValueRef char_ptr = LLVMConstGEP2(t_type->llvm_type(), glob, zeros, 2);
-    LLVMValueRef string_values[2] = {
-        char_ptr, LLVMConstInt(NumType(false).llvm_type(), str.size(), false)};
-    LLVMValueRef string = LLVMConstStruct(string_values, 2, true);
-    return new ConstValue(string_type, string);
+    return new ConstValue(t_type,
+                          LLVMConstString(str.c_str(), str.size(), true));
   }
   bool is_constant() { return true; }
 };
 
+static PointerType *c_str_type;
+class CStringExprAST : public ExprAST {
+public:
+  std::string str;
+  CStringExprAST(std::string str) : str(str) {
+    if (!char_type)
+      char_type = new NumType(8, false, false);
+    if (!c_str_type)
+      c_str_type = new PointerType(char_type);
+  }
+  Type *get_type() { return c_str_type; }
+  Value *gen_value() {
+    LLVMValueRef value = LLVMConstString(str.c_str(), str.size(), false);
+    LLVMTypeRef type = LLVMArrayType(char_type->llvm_type(), str.size() + 1);
+    LLVMValueRef ptr = LLVMAddGlobal(curr_module, type, ".c_str");
+    LLVMSetInitializer(ptr, value);
+    LLVMSetGlobalConstant(ptr, true);
+    LLVMValueRef cast =
+        LLVMBuildBitCast(curr_builder, ptr, c_str_type->llvm_type(), UN);
+    return new ConstValue(c_str_type, cast);
+  }
+};
+
 LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
                                NumType *lhs_nt, NumType *rhs_nt) {
-  if (lhs_nt->bits > rhs_nt->bits)
+  if (lhs_nt->neq(rhs_nt))
     R = gen_num_cast(R, rhs_nt, lhs_nt);
-  else if (rhs_nt->bits > lhs_nt->bits)
-    L = gen_num_cast(L, lhs_nt, rhs_nt);
   bool floating = lhs_nt->is_floating && rhs_nt->is_floating;
   if (floating)
     switch (op) {
@@ -472,10 +480,9 @@ public:
   }
 
   Value *gen_assign() {
-    LLVMValueRef store_ptr = LHS->gen_value()->gen_ptr();
     CastValue *val = RHS->gen_value()->cast_to(LHS->get_type());
-    LLVMBuildStore(curr_builder, val->gen_val(), store_ptr);
-    return new BasicLoadValue(store_ptr, get_type());
+    LLVMBuildStore(curr_builder, val->gen_val(), LHS->gen_value()->gen_ptr());
+    return val;
   }
   Value *gen_value() {
     if (op == '=')
@@ -544,17 +551,16 @@ public:
       else
         error("'-' unary op can only be used on numbers");
     case '*':
-      return new BasicLoadValue(val->gen_val(), type);
+      return new BasicLoadValue(type, val->gen_val());
     case '&':
       return new ConstValue(type, val->gen_ptr());
-    case T_RETURN: {
-      LLVMBuildRet(curr_builder,
-                   val->cast_to(curr_func_type->return_type)->gen_val());
-      auto block = LLVMAppendBasicBlock(
-          LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder)), UN);
-      LLVMPositionBuilderAtEnd(curr_builder, block);
+    case T_RETURN:
+      add_return(val->gen_val());
+      LLVMPositionBuilderAtEnd(
+          curr_builder,
+          LLVMAppendBasicBlock(
+              LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder)), UN));
       return val;
-    }
     default:
       error("invalid prefix unary operator '" + token_to_str(op) + "'");
     }
@@ -644,8 +650,6 @@ public:
       return p_type->get_points_to();
     else if (ArrayType *arr_type = dynamic_cast<ArrayType *>(base_type))
       return arr_type->get_elem_type();
-    else if (base_type->type_type() == String)
-      return new NumType(8, false, false);
     else
       error("Invalid index, type not arrayish.\n"
             "Expected: array | pointer \nGot: " +
@@ -654,13 +658,31 @@ public:
 
   Value *gen_value() {
     Type *type = get_type();
-    LLVMValueRef val = value->gen_value()->gen_val();
-    if (value->get_type()->type_type() == String)
-      val = LLVMBuildExtractValue(curr_builder, val, 0, UN); // get char ptr
+    Value *val = value->gen_value();
     LLVMValueRef index_v = index->gen_value()->gen_val();
-    return new BasicLoadValue(
-        LLVMBuildGEP2(curr_builder, type->llvm_type(), val, &index_v, 1, UN),
-        type);
+    Type *base_type = value->get_type();
+    if (PointerType *p_type = dynamic_cast<PointerType *>(base_type)) {
+      return new BasicLoadValue(
+          type,
+          LLVMBuildGEP2(curr_builder, p_type->get_points_to()->llvm_type(),
+                        val->gen_val(), &index_v, 1, UN));
+    } else if (ArrayType *arr_type = dynamic_cast<ArrayType *>(base_type)) {
+      if (val->has_ptr()) {
+        LLVMValueRef index[2] = {LLVMConstNull(NumType(false).llvm_type()),
+                                 index_v};
+        return new BasicLoadValue(
+            type, LLVMBuildGEP2(curr_builder, arr_type->llvm_type(),
+                                val->gen_ptr(), index, 2, UN));
+      } else if (LLVMIsAConstantInt(index_v)) {
+        return new ConstValue(
+            type, LLVMBuildExtractValue(curr_builder, val->gen_val(),
+                                        LLVMConstIntGetZExtValue(index_v), UN));
+      } else
+        error("Can't index an array that doesn't have a pointer");
+    }
+    error("Invalid index, type not arrayish.\n"
+          "Expected: array | pointer \nGot: " +
+          base_type->stringify());
   }
 };
 
@@ -692,10 +714,9 @@ public:
     // is a struct-value (String) then access on the pointer to where it's
     // stored.
     LLVMValueRef struct_ptr = is_ptr ? src->gen_val() : src->gen_ptr();
-    return new BasicLoadValue(LLVMBuildStructGEP2(curr_builder,
-                                                  source_type->llvm_type(),
-                                                  struct_ptr, index, UN),
-                              type);
+    return new BasicLoadValue(
+        type, LLVMBuildStructGEP2(curr_builder, source_type->llvm_type(),
+                                  struct_ptr, index, UN));
   }
 };
 
@@ -738,10 +759,9 @@ public:
     // is a struct-value (String) then access on the pointer to where it's
     // stored.
     LLVMValueRef struct_ptr = is_ptr ? src->gen_val() : src->gen_ptr();
-    return new BasicLoadValue(LLVMBuildStructGEP2(curr_builder,
-                                                  source_type->llvm_type(),
-                                                  struct_ptr, index, UN),
-                              type);
+    return new BasicLoadValue(
+        type, LLVMBuildStructGEP2(curr_builder, source_type->llvm_type(),
+                                  struct_ptr, index, UN));
   }
 };
 
@@ -807,22 +827,21 @@ public:
     if (!st)
       error("Cannot create instance of non-struct type " +
             s_type->type()->stringify());
-    LLVMValueRef ptr = is_new
-                           ? build_malloc(st)->gen_val()
-                           : LLVMBuildAlloca(curr_builder, st->llvm_type(), UN);
+    LLVMValueRef agg = LLVMConstNull(st->llvm_type());
     for (size_t i = 0; i < fields.size(); i++) {
       auto &[key, value] = fields[i];
-      LLVMValueRef set_ptr = LLVMBuildStructGEP2(
-          curr_builder, st->llvm_type(), ptr, st->get_index(key), key.c_str());
-      LLVMBuildStore(
-          curr_builder,
+      agg = LLVMBuildInsertValue(
+          curr_builder, agg,
           value->gen_value()->cast_to(st->get_elem_type(i))->gen_val(),
-          set_ptr);
+          st->get_index(key), key.c_str());
     }
-    if (is_new)
+    if (is_new) {
+      LLVMValueRef ptr = build_malloc(st)->gen_val();
+      LLVMBuildStore(curr_builder, agg, ptr);
       return new ConstValue(s_type->type()->ptr(), ptr);
-    else
-      return new BasicLoadValue(ptr, s_type->type());
+    } else {
+      return new ConstValue(s_type->type(), agg);
+    }
   }
 };
 
@@ -831,7 +850,7 @@ class TupleExprAST : public ExprAST {
   TupleType *t_type;
 
 public:
-  bool is_new;
+  bool is_new = false;
   TupleExprAST(std::vector<ExprAST *> values) : values(values) {}
 
   Type *get_type() {
@@ -847,26 +866,30 @@ public:
 
   Value *gen_value() {
     if (is_constant()) {
-      LLVMValueRef vals[values.size()];
+      LLVMValueRef *vals = new LLVMValueRef[values.size()];
       for (size_t i = 0; i < values.size(); i++)
         vals[i] = values[i]->gen_value()->gen_val();
       return new ConstValue(get_type(),
                             LLVMConstStruct(vals, values.size(), true));
     }
     Type *type = get_type();
-    LLVMValueRef ptr = is_new
-                           ? build_malloc(t_type)->gen_val()
-                           : LLVMBuildAlloca(curr_builder, t_type->llvm_type(),
-                                             is_new ? "malloc" : "alloca");
-    for (size_t i = 0; i < values.size(); i++) {
-      LLVMValueRef set_ptr = LLVMBuildStructGEP2(
-          curr_builder, t_type->llvm_type(), ptr, i, "tupleset");
-      LLVMBuildStore(curr_builder, values[i]->gen_value()->gen_val(), set_ptr);
+    if (is_new) {
+      LLVMValueRef ptr = build_malloc(t_type)->gen_val();
+      for (size_t i = 0; i < values.size(); i++) {
+        auto value = values[i]->gen_value()->gen_val();
+        LLVMValueRef set_ptr =
+            LLVMBuildStructGEP2(curr_builder, t_type->llvm_type(), ptr, i, UN);
+        LLVMBuildStore(curr_builder, value, set_ptr);
+      }
+      return new ConstValue(t_type->ptr(), ptr);
+    } else {
+      LLVMValueRef agg = LLVMConstNull(t_type->llvm_type());
+      for (size_t i = 0; i < values.size(); i++) {
+        auto value = values[i]->gen_value()->gen_val();
+        agg = LLVMBuildInsertValue(curr_builder, agg, value, i, UN);
+      }
+      return new ConstValue(t_type, agg);
     }
-    if (is_new)
-      return new ConstValue(type, ptr);
-    else
-      return new BasicLoadValue(ptr, type);
   }
   bool is_constant() {
     if (is_new)
@@ -1019,7 +1042,7 @@ public:
     // merge
     LLVMAppendExistingBasicBlock(func, merge_bb);
     LLVMPositionBuilderAtEnd(curr_builder, merge_bb);
-    return new PHIValue(then_bb, then_v, else_bb, else_v);
+    return gen_phi(then_bb, then_v, else_bb, else_v);
   }
 };
 
@@ -1061,7 +1084,7 @@ public:
     // merge
     LLVMAppendExistingBasicBlock(func, merge_bb);
     LLVMPositionBuilderAtEnd(curr_builder, merge_bb);
-    return new PHIValue(then_bb, then_v, else_bb, else_v);
+    return gen_phi(then_bb, then_v, else_bb, else_v);
   }
 };
 
@@ -1110,7 +1133,7 @@ public:
     // merge
     LLVMAppendExistingBasicBlock(func, merge_bb);
     LLVMPositionBuilderAtEnd(curr_builder, merge_bb);
-    return new PHIValue(then_bb, then_v, else_bb, else_v);
+    return gen_phi(then_bb, then_v, else_bb, else_v);
   }
 };
 

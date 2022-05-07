@@ -11,6 +11,10 @@ static bool
 static char num_type; // Type of number. 'd' => double, 'f' => float, 'i' =>
                       // int32, 'u' => uint32, 'b' => byte/char/uint8
 static std::string string_value; // "[^"]*" - Filled in if T_STRING
+static enum {
+  C_STRING,
+  CHAR_ARRAY
+} string_type; // Type of string. 'c' => C-string, 's' => char[len]
 
 std::string token_to_str(const int token) {
   switch (token) {
@@ -108,6 +112,11 @@ static int next_token() {
     }
     string_value = stream.str();
     last_char = next_char();
+    if (last_char == 'c') {
+      string_type = C_STRING;
+      last_char = next_char();
+    } else
+      string_type = CHAR_ARRAY;
     return T_STRING;
   } else if (last_char == '\'') {
     // Char: '[^']'

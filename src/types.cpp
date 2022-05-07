@@ -165,10 +165,10 @@ PointerType *Type::ptr() { return new PointerType(this); }
 class ArrayType : public Type {
 public:
   Type *elem;
-  unsigned int count;
-  ArrayType(Type *elem, unsigned int count) : elem(elem), count(count) {}
+  uint count;
+  ArrayType(Type *elem, uint count) : elem(elem), count(count) {}
   Type *get_elem_type() { return elem; }
-  unsigned int get_elem_count() { return count; }
+  uint get_elem_count() { return count; }
   LLVMTypeRef llvm_type() { return LLVMArrayType(elem->llvm_type(), count); }
   TypeType type_type() { return TypeType::Array; }
   bool eq(Type *other) {

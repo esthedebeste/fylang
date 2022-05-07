@@ -191,6 +191,24 @@ static TypeAST *parse_type_postfix() {
         eat(']');
         prev = new ArrayTypeAST(prev, std::stoi(num));
       }
+      break;
+    }
+    case '|': {
+      static bool pass = false;
+      if (pass)
+        return prev;
+      eat('|');
+      pass = true;
+      std::vector<TypeAST *> types = {prev};
+      while (1) {
+        types.push_back(parse_type());
+        if (curr_token != '|')
+          break;
+        eat('|');
+      }
+      pass = false;
+      prev = new UnionTypeAST(types);
+      break;
     }
     default:
       return prev;
@@ -219,7 +237,9 @@ static ExprAST *parse_char_expr() {
   return result;
 }
 static ExprAST *parse_string_expr() {
-  auto result = new StringExprAST(string_value);
+  auto result = string_type == C_STRING
+                    ? (ExprAST *)new CStringExprAST(string_value)
+                    : (ExprAST *)new StringExprAST(string_value);
   eat(T_STRING);
   return result;
 }
@@ -591,9 +611,13 @@ static ExprAST *parse_expr() {
   return parse_bin_op_rhs(0, LHS);
 }
 /// prototype
-///   ::= id '(' id* ')'
-///   ::= '(' type ')' id '(' id* ')'
+///   ::= fun id '(' id* ')'
+///   ::= fun '(' type ')' id '(' id* ')'
 static FunctionAST *parse_prototype(TypeAST *default_return_type = nullptr) {
+  bool is_inline = curr_token == T_INLINE;
+  if (is_inline)
+    eat(T_INLINE);
+  eat(T_FUNCTION);
   TypeAST *this_t = nullptr;
   if (curr_token == '(') {
     // type method
@@ -634,14 +658,14 @@ static FunctionAST *parse_prototype(TypeAST *default_return_type = nullptr) {
     return_type = default_return_type;
 
   if (this_t)
-    return new MethodAST(this_t, fn_name, args, vararg, return_type);
+    return new MethodAST(this_t, fn_name, args, {vararg, is_inline},
+                         return_type);
   else
-    return new FunctionAST(fn_name, args, vararg, return_type);
+    return new FunctionAST(fn_name, args, {vararg, is_inline}, return_type);
 }
 
 /// definition ::= 'fun' prototype expression
 static FunctionAST *parse_definition() {
-  eat(T_FUNCTION);
   FunctionAST *func = parse_prototype(nullptr /* assume from body */);
   auto body = parse_expr();
   func->body = body;
@@ -653,7 +677,6 @@ static FunctionAST *parse_definition() {
 static DeclareExprAST *parse_declare() {
   eat(T_DECLARE); // eat declare.
   if (curr_token == T_FUNCTION) {
-    eat(T_FUNCTION);
     FunctionAST *func = parse_prototype(type_ast(new NumType(32, false, true)));
     return new DeclareExprAST(func);
   } else if (curr_token == T_CONST || curr_token == T_LET) {

@@ -3,27 +3,34 @@ include "c/stdlib"
 include "types.fy"
 include "char.fy"
 
-fun(char[]) length()
+inline fun(*char) length()
 	strlen(this)
-fun(char[]) clone()
+inline fun(*char) clone()
 	strdup(this)
 
-/// built-in struct
-/// struct String {
-/// 	chars: char[],
-/// 	length: uint_ptrsize
-/// }
-type String = typeof ""
+struct String {
+	chars: *char,
+	length: uint_ptrsize
+}
 
-fun alloc_chars(amount: uint_ptrsize): char[]
+inline fun alloc_chars(amount: uint_ptrsize): *char
 	calloc(amount, 1) // null-initialized
 
-fun create_string(chars: char[])
+inline fun create_string(chars: *char)
 	create String { chars = chars.clone(), length = chars.length() }
+
+fun str(chars: char[generic Length] | *char[generic Length]) {
+	const copy = alloc_chars(Length)
+	if(typeof(chars) == *char[generic Length])
+		memcpy(copy, chars, Length)
+	else
+		*(copy as *char[generic Length]) = chars
+	create String { chars = copy, length = Length }
+}
 
 fun(String) concat(other: String): String {
 	const length = this.length + other.length
-	const chars = alloc_chars(length + 1)
+	const chars = alloc_chars(length)
 	memcpy(chars, this.chars, this.length)
 	memcpy(chars + this.length, other.chars, other.length)
 	create String { chars = chars, length = length }
@@ -49,13 +56,13 @@ fun(String) filter(predicate: *fun(char): bool): String {
 	create String { chars = realloc(result, len), length = len }
 }
 
-fun(String) uppercase(): String
+inline fun(String) uppercase(): String
 	this.transform(&to_upper)
 
-fun(String) lowercase(): String
+inline fun(String) lowercase(): String
 	this.transform(&to_lower)
 
-fun streql(a: char[], b: char[], len: uint_ptrsize): bool {
+fun streql(a: *char, b: *char, len: uint_ptrsize): bool {
 	for (let i = 0 as uint_ptrsize; i < len; i += 1)
 		if (a[i] != b[i])
 			return false
@@ -79,4 +86,11 @@ fun(String) ends_with(postfix: String): bool
 
 fun(String) equals(other: String): bool
 	if (this.length != other.length) false
-	else streql(this.chars, other.chars, this.length)
+	else {
+		for (let i = 0; i < this.length; i += 1)
+			if (this.chars[i] != other.chars[i])
+				return false
+		true
+	}
+
+inline fun(String) print_to(s: *FILE) fwrite(this.chars, 1, this.length, s)

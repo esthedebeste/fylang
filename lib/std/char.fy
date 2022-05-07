@@ -14,20 +14,20 @@ fun is_space(ch: char) ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
 fun is_hexdigit(ch: char) is_digit(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
 
 // char.method()
-fun(char) is_lower() is_lower(this)
-fun(char) is_upper() is_upper(this)
-fun(char) is_alpha() is_alpha(this)
-fun(char) is_digit() is_digit(this)
-fun(char) is_alphanumeric() is_alphanumeric(this)
-fun(char) is_control() is_control(this)
-fun(char) is_graphic() is_graphic(this)
-fun(char) is_printable() is_printable(this)
-fun(char) is_punctuation() is_punctuation(this)
-fun(char) is_space() is_space(this)
-fun(char) is_hexdigit() is_hexdigit(this)
+inline fun(char) is_lower() is_lower(this)
+inline fun(char) is_upper() is_upper(this)
+inline fun(char) is_alpha() is_alpha(this)
+inline fun(char) is_digit() is_digit(this)
+inline fun(char) is_alphanumeric() is_alphanumeric(this)
+inline fun(char) is_control() is_control(this)
+inline fun(char) is_graphic() is_graphic(this)
+inline fun(char) is_printable() is_printable(this)
+inline fun(char) is_punctuation() is_punctuation(this)
+inline fun(char) is_space() is_space(this)
+inline fun(char) is_hexdigit() is_hexdigit(this)
 
 fun to_lower(ch: char) if(is_upper(ch)) { ch - 'A' + 'a' } else ch
 fun to_upper(ch: char) if(is_lower(ch)) { ch - 'a' + 'A' } else ch
 
-fun(char) to_lower() to_lower(this)
-fun(char) to_upper() to_upper(this)
+inline fun(char) to_lower() to_lower(this)
+inline fun(char) to_upper() to_upper(this)

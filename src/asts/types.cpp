@@ -115,6 +115,18 @@ public:
     error("unimplemented unary op " + token_to_str(opc));
   }
   bool is_generic() { return operand->is_generic(); }
+  std::string stringify() {
+    switch (opc) {
+    case '*':
+    case '&':
+      return ((char)opc) + operand->stringify();
+    case T_UNSIGNED:
+    case T_SIGNED:
+      return token_to_str(opc) + " " + operand->stringify();
+    default:
+      error("unimplemented stringify for unary op " + token_to_str(opc));
+    }
+  }
 };
 
 class FunctionTypeAST : public TypeAST {
@@ -203,8 +215,8 @@ public:
   bool match(Type *type, uint *generic_count) {
     if (ArrayType *a = dynamic_cast<ArrayType *>(type)) {
       if (this->elem->match(a->elem, generic_count)) {
-        curr_scope->set_variable(
-            count_name, new IntValue(NumType(64, false, false), a->count));
+        curr_scope->set_variable(count_name,
+                                 new IntValue(NumType(false), a->count));
         if (generic_count)
           (*generic_count) += 1;
         return true;
@@ -212,7 +224,10 @@ public:
     }
     return false;
   }
-  bool is_generic() { return elem->is_generic(); }
+  bool is_generic() { return true; }
+  std::string stringify() {
+    return elem->stringify() + "[generic " + count_name + "]";
+  }
 };
 
 class StructTypeAST : public TypeAST {
@@ -371,6 +386,56 @@ public:
   bool is_generic() { return false; }
 };
 
+class UnionTypeAST : public TypeAST {
+  TypeAST *picked;
+
+public:
+  std::vector<TypeAST *> choices;
+  UnionTypeAST(std::vector<TypeAST *> choices) : choices(choices) {}
+  // depends on match being called before type
+  Type *type() { return picked->type(); }
+  bool eq(TypeAST *other) {
+    UnionTypeAST *g = dynamic_cast<UnionTypeAST *>(other);
+    if (!g || choices.size() != g->choices.size())
+      return false;
+    for (size_t i = 0; i < choices.size(); i++)
+      if (!choices[i]->eq(g->choices[i]))
+        return false;
+    return true;
+  }
+  bool match(Type *type, uint *generic_count) {
+    if (generic_count == nullptr) {
+      for (auto &c : choices)
+        if (c->match(type)) {
+          picked = c;
+          return true;
+        }
+    } else {
+      for (auto &c : choices) {
+        uint g_copy = *generic_count + 1;
+        if (c->match(type, &g_copy)) {
+          picked = c;
+          *generic_count = g_copy;
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  bool is_generic() { return true; }
+  std::string stringify() {
+    std::stringstream res;
+    res << "(";
+    for (size_t i = 0; i < choices.size(); i++) {
+      if (i != 0)
+        res << " | ";
+      res << choices[i]->stringify();
+    }
+    res << ")";
+    return res.str();
+  }
+};
+
 class GenericTypeAST : public TypeAST {
 public:
   std::string name;
@@ -387,4 +452,5 @@ public:
     return true;
   }
   bool is_generic() { return true; }
+  std::string stringify() { return "generic " + name; }
 };

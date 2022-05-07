@@ -54,6 +54,7 @@ static void main_loop() {
       get_next_token();
       break;
     case T_FUNCTION:
+    case T_INLINE:
       handle_definition();
       break;
     case T_DECLARE:
