@@ -33,10 +33,25 @@ struct Scope {
 Scope *global_scope = new Scope(nullptr);
 Scope *curr_scope = global_scope;
 Scope *push_scope() { return curr_scope = new Scope(curr_scope); }
-Scope *pop_scope() { return curr_scope = curr_scope->parent_scope; }
+Scope *pop_scope();
 
 #include "functions.cpp"
 #include "types.cpp"
+
+Scope *pop_scope() {
+  for (auto &[name, value] : curr_scope->named_variables) {
+    LLVMValueRef llvm_val = value->gen_val();
+    Type *type = value->get_type();
+    if (!llvm_val) // type phase
+      continue;
+    ConstValue val = ConstValue(type, llvm_val);
+    FunctionAST *destructor = type->get_destructor();
+    if (!destructor)
+      continue;
+    destructor->gen_call({&val});
+  }
+  return curr_scope = curr_scope->parent_scope;
+}
 NumType *sizeof_type;
 /// SizeofExprAST - Expression class to get the byte size of a type
 class SizeofExprAST : public ExprAST {
@@ -227,16 +242,18 @@ public:
     LLVMValueRef ptr =
         LLVMAddGlobal(curr_module, type->llvm_type(), id.c_str());
     if (value) {
-      if (value->is_constant())
-        LLVMSetInitializer(ptr, value->gen_value()->cast_to(type)->gen_val());
-      else {
+      if (value->is_constant()) {
+        LLVMValueRef val = value->gen_value()->cast_to(type)->gen_val();
+        LLVMSetInitializer(ptr, val);
+        curr_scope->set_variable(id, new ConstValue(type, val));
+      } else {
         LLVMSetInitializer(ptr, LLVMConstNull(type->llvm_type()));
         add_store_before_main(ptr, new CastExprAST(value, type_ast(type)));
+        curr_scope->set_variable(id, new BasicLoadValue(type, ptr));
       }
     }
     if (constant)
       LLVMSetGlobalConstant(ptr, true);
-    curr_scope->set_variable(id, new BasicLoadValue(type, ptr));
     return ptr;
   }
   Value *gen_value() {
@@ -653,7 +670,7 @@ public:
     else
       error("Invalid index, type not arrayish.\n"
             "Expected: array | pointer \nGot: " +
-            tt_to_str(base_type->type_type()));
+            base_type->stringify());
   }
 
   Value *gen_value() {
@@ -929,15 +946,17 @@ public:
   }
 };
 
+ConstValue *null_value(Type *type) {
+  return new ConstValue(type, LLVMConstNull(type->llvm_type()));
+}
 /// NullExprAST - null
 class NullExprAST : public ExprAST {
 public:
   Type *type;
   NullExprAST(Type *type) : type(type) {}
+  NullExprAST() : type(new NullType()) {}
   Type *get_type() { return type; }
-  Value *gen_value() {
-    return new ConstValue(type, LLVMConstNull(type->llvm_type()));
-  }
+  Value *gen_value() { return null_value(type); }
   bool is_constant() { return true; }
 };
 
@@ -946,10 +965,10 @@ public:
   TypeAST *a;
   TypeAST *b;
   TypeAssertExprAST(TypeAST *a, TypeAST *b) : a(a), b(b) {}
-  Type *get_type() { return new VoidType(); }
+  Type *get_type() { return new NullType(); }
   Value *gen_value() {
     if (a->eq(b))
-      return NullExprAST(get_type()).gen_value();
+      return null_value(get_type());
     else
       error("Type mismatch in Type assertion, " + a->stringify() +
             " != " + b->stringify());
@@ -960,10 +979,10 @@ class TypeDumpExprAST : public ExprAST {
 public:
   TypeAST *type;
   TypeDumpExprAST(TypeAST *type) : type(type) {}
-  Type *get_type() { return new VoidType(); }
+  Type *get_type() { return new NullType(); }
   Value *gen_value() {
     std::cout << "[DUMP] Dumped type: " << type->stringify();
-    return NullExprAST(get_type()).gen_value();
+    return null_value(get_type());
   }
 };
 

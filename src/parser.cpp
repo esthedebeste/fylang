@@ -246,6 +246,8 @@ static ExprAST *parse_string_expr() {
 /// parenexpr ::= '(' expression ')'
 static ExprAST *parse_paren_expr() {
   eat('(');
+  if (curr_token == ')')
+    return new TupleExprAST({}); // empty tuple
   auto expr = parse_expr();
   if (curr_token == ',') {
     eat(',');
@@ -456,6 +458,9 @@ static ExprAST *parse_primary() {
     return parse_number_expr();
   case T_CHAR:
     return parse_char_expr();
+  case T_NULL:
+    eat(T_NULL);
+    return new NullExprAST();
   case T_STRING:
     return parse_string_expr();
   case '(':

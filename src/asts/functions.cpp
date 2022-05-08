@@ -23,11 +23,11 @@ void add_return(Value *ret_val, LLVMBasicBlockRef curr_block =
 }
 
 class MethodAST;
+class FunctionAST;
 static std::unordered_map<std::string, std::vector<MethodAST *>>
     curr_extension_methods;
-
-class FunctionAST;
 std::unordered_map<std::string, FunctionAST *> curr_named_functions;
+
 class FunctionAST {
 public:
   std::string name;
@@ -120,18 +120,22 @@ public:
     curr_return_state = prev_return_state;
     return ret_phi;
   }
+
   ConstValue *gen_call(std::vector<ExprAST *> args) {
-    if (ft.vararg ? args.size() < this->args.size()
-                  : args.size() != this->args.size())
-      error("wrong number of arguments to function "
-            << name << " (expected " << this->args.size() << ", got "
-            << args.size() << ")");
     std::vector<Value *> arg_vals(args.size());
     for (size_t i = 0; i < args.size(); ++i)
       arg_vals[i] = args[i]->gen_value();
+    return gen_call(arg_vals);
+  }
+  ConstValue *gen_call(std::vector<Value *> arg_vals) {
+    if (ft.vararg ? arg_vals.size() < this->args.size()
+                  : arg_vals.size() != this->args.size())
+      error("wrong number of arguments to function "
+            << name << " (expected " << this->args.size() << ", got "
+            << arg_vals.size() << ")");
     Scope *prev_scope = curr_scope;
     curr_scope = new Scope(global_scope);
-    for (size_t i = 0; i < args.size(); ++i) {
+    for (size_t i = 0; i < arg_vals.size(); ++i) {
       Type *arg_type = arg_vals[i]->get_type();
       if (i < this->args.size()) {
         if (this->args[i].second->castable_from(arg_type))
@@ -187,11 +191,6 @@ public:
   }
 
   FuncValue *gen_ptr() {
-    if (ft.vararg ? args.size() < this->args.size()
-                  : args.size() != this->args.size())
-      error("wrong number of arguments to function "
-            << name << " (expected " << this->args.size() << ", got "
-            << args.size() << ")");
     Scope *prev_scope = curr_scope;
     curr_scope = new Scope(global_scope);
     for (auto &[name, type] : this->args)
@@ -208,7 +207,7 @@ public:
     if (body && !LLVMGetFirstBasicBlock(declaration->func)) {
       LLVMValueRef position_back_to =
           LLVMGetInsertBlock(curr_builder)
-              ? LLVMBuildAlloca(curr_builder, VoidType().llvm_type(), UN)
+              ? LLVMBuildAlloca(curr_builder, NullType().llvm_type(), UN)
               : nullptr;
       size_t prev_unnamed = unnamed_acc;
       unnamed_acc = 0;
@@ -251,7 +250,7 @@ public:
       : FunctionAST(name, add_this_type(args, this_type), flags, return_type,
                     body),
         this_type(this_type) {}
-  std::string get_name(FunctionType *type) {
+  std::string get_name(FunctionType *type) override {
     return this_type->type()->stringify() + "." + FunctionAST::get_name(type);
   }
   FunctionType *get_type(std::vector<ExprAST *> args, ExprAST *this_arg) {
@@ -263,7 +262,7 @@ public:
     return FunctionAST::gen_call(args);
   }
 
-  virtual void add() { curr_extension_methods[name].push_back(this); }
+  void add() override { curr_extension_methods[name].push_back(this); }
 };
 
 MethodAST *get_method(Type *this_type, std::string name) {
@@ -280,3 +279,5 @@ MethodAST *get_method(Type *this_type, std::string name) {
   }
   return best_match;
 }
+
+FunctionAST *Type::get_destructor() { return get_method(this, "__free__"); }

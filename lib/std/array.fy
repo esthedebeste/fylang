@@ -20,6 +20,9 @@ fun(*Array<generic T>) init() {
 	this.allocated = 1
 }
 
+inline fun(Array<generic T>) __free__()
+	free(this.ptr)
+
 // returns the array's new length
 fun(*Array<generic T>) push(added: T): uint_ptrsize {
 	if(this.length >= this.allocated) {
@@ -33,7 +36,7 @@ fun(*Array<generic T>) push(added: T): uint_ptrsize {
 
 fun(*Array<generic T>) at_ptr(index: int_ptrsize): *T {
 	const i: int_ptrsize = if(index < 0) this.length as int_ptrsize + index else index
-	if(i < 0 || i >= this.length) NULLPTR as *T
+	if(i < 0 || i >= this.length) null as *T
 	else &this.ptr[i]
 }
 
@@ -42,7 +45,7 @@ inline fun(*Array<generic T>) set(index: int_ptrsize, to: T): T
 
 fun(*Array<generic T>) at(index: int_ptrsize): T {
 	const ptr = this.at_ptr(index)
-	if(ptr == (NULLPTR as *T)) if(type T == *generic A) { NULLPTR as *A } else { 0 as T }
+	if(ptr == (nullptr as *T)) null as T
 	else *ptr
 }
 

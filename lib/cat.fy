@@ -21,6 +21,5 @@ fun main(argc: int, argv: **char) {
 		stdout.write_buffer(&buffer, amount_read)
 		amount_read = file.read_into(&buffer)
 	}
-	file.close()
 	0
 }

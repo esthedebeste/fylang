@@ -4,23 +4,15 @@ include "utils.fy"
 
 type File = *FILE
 
-
 inline fun open_file(path: char[generic Len] | *char, mode: char[generic Len] | *char): { err: bool, file: File } {
 	// convert char[Len] to *char for fopen
 	const ppath = if(typeof(path) == *char) path else temp_c_str(path)
 	const pmode = if(typeof(mode) == *char) mode else temp_c_str(mode)
-	__open_file(ppath, pmode)
-}
-
-fun __open_file(path: *char, mode: *char) {
 	const file: File = fopen(path, mode)
-	if (file == NULLPTR)
-		(true, file)
-	else
-		(false, file)
+	return (/*err: */file == nullptr, /*file: */file)
 }
 
-inline fun(File) close()
+inline fun(File) __free__()
 	fclose(this)
 
 // Returns amount read

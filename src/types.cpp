@@ -1,10 +1,8 @@
 #pragma once
 #include "utils.cpp"
 
-static LLVMTypeRef void_type = LLVMStructType(nullptr, 0, true);
-
 enum TypeType : int {
-  Void,
+  Null,
   Number,
   Pointer,
   Function,
@@ -12,26 +10,8 @@ enum TypeType : int {
   Struct,
   Tuple,
 };
-static std::string tt_to_str(TypeType tt) {
-  switch (tt) {
-  case Void:
-    return "void";
-  case Number:
-    return "number";
-  case Pointer:
-    return "pointer";
-  case Function:
-    return "function";
-  case Array:
-    return "array";
-  case Struct:
-    return "struct";
-  case Tuple:
-    return "tuple";
-  }
-  error("Unknown TypeType");
-};
 class PointerType;
+class FunctionAST;
 /// Base type class.
 class Type {
 public:
@@ -42,6 +22,7 @@ public:
   virtual bool neq(Type *other) { return !eq(other); }
   virtual bool castable_to(Type *other) { return eq(other); }
   virtual std::string stringify() { error("stringify not implemented yet"); }
+  virtual FunctionAST *get_destructor(); // defined in asts/functions.cpp
   bool operator==(Type *other) { return eq(other); }
   bool operator!=(Type *other) { return neq(other); }
   PointerType *ptr();
@@ -60,15 +41,15 @@ template <> struct std::hash<std::vector<Type *>> {
   }
 };
 
-class VoidType : public Type {
+class NullType : public Type {
 public:
-  VoidType() {}
-  LLVMTypeRef llvm_type() { return void_type; }
-  TypeType type_type() { return TypeType::Void; }
-  bool eq(Type *other) { return other->type_type() == TypeType::Void; }
-  bool castable_to(Type *other) { return eq(other); }
-  std::string stringify() { return "void"; }
-  size_t _hash() { return hash(TypeType::Void); }
+  NullType() {}
+  LLVMTypeRef llvm_type() { return LLVMStructType(nullptr, 0, true); }
+  TypeType type_type() { return TypeType::Null; }
+  bool eq(Type *other) { return other->type_type() == TypeType::Null; }
+  bool castable_to(Type *other) { return true; }
+  std::string stringify() { return "null"; }
+  size_t _hash() { return hash(TypeType::Null); }
 };
 
 class NumType : public Type {

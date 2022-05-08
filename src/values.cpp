@@ -145,6 +145,8 @@ LLVMValueRef cast(Value *source, Type *to) {
     return gen_ptr_cast(source->gen_val(), ptr, to);
   if (ArrayType *tup = dynamic_cast<ArrayType *>(src))
     return gen_arr_cast(source, tup, to);
+  if (src->type_type() == TypeType::Null)
+    return LLVMConstNull(to->llvm_type());
   error("Invalid cast from " + src->stringify() + " to " + to->stringify());
 }
 

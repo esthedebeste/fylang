@@ -55,6 +55,7 @@ enum Token : const int {
   T_SIZEOF,        // sizeof
   T_TRUE,          // true
   T_FALSE,         // false
+  T_NULL,          // null
   T_FOR,           // for
   T_PLUSEQ,        // +=
   T_MINEQ,         // -=
@@ -128,6 +129,7 @@ static std::unordered_map<Token, std::string> token_strs = {
     {T_SIZEOF, "sizeof"},
     {T_TRUE, "true"},
     {T_FALSE, "false"},
+    {T_NULL, "null"},
     {T_FOR, "for"},
     {T_PLUSEQ, "+="},
     {T_MINEQ, "-="},
@@ -163,6 +165,7 @@ static std::unordered_map<std::string, Token> keywords = {
     {"sizeof", T_SIZEOF},
     {"true", T_TRUE},
     {"false", T_FALSE},
+    {"null", T_NULL},
     {"for", T_FOR},
     {"DUMP", T_DUMP},
     {"ASSERT_TYPE", T_ASSERT_TYPE},

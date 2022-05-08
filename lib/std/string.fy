@@ -13,6 +13,9 @@ struct String {
 	length: uint_ptrsize
 }
 
+inline fun(String) __free__()
+	free(this.chars)
+
 inline fun alloc_chars(amount: uint_ptrsize): *char
 	calloc(amount, 1) // null-initialized
 
