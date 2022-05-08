@@ -84,13 +84,18 @@ fun(String) ends_with(postfix: String): bool
 		true
 	}
 
-fun(String) equals(other: String): bool
-	if (this.length != other.length) false
-	else {
-		for (let i = 0; i < this.length; i += 1)
-			if (this.chars[i] != other.chars[i])
-				return false
-		true
-	}
+fun __streq(a: *char, b: *char, len: uint_ptrsize): bool {
+	for (let i = 0; i < len; i += 1)
+		if (a[i] != b[i])
+			return false
+	true
+}
+
+inline fun(String | char[generic Alen]) equals(other: String | char[generic Blen]): bool {
+	const alen = if(typeof(this) == String) this.length else Alen
+	const blen = if(typeof(other) == String) other.length else Blen
+	if(alen != blen) false
+	else __streq(this, other, alen)
+}
 
 inline fun(String) print_to(s: *FILE) fwrite(this.chars, 1, this.length, s)

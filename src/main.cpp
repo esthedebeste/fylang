@@ -183,10 +183,7 @@ int main(int argc, char **argv, char **envp) {
     if (errored)
       error(std::string("JIT Failed: ") + err);
     int nargc = argc - 2;
-    char **nargv = new char *[nargc];
-    nargv[0] = input;
-    for (int i = 1; i < nargc; i++)
-      nargv[i] = strdup(argv[i + 2]);
+    char **nargv = argv + 2;
     int exit_code =
         LLVMRunFunctionAsMain(engine, main_function, nargc, nargv, envp);
     if (!QUIET)

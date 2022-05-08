@@ -21,12 +21,6 @@ do
   try
 done
 echo " - Examples test done"
-for file in $dir/lib/*.fy $dir/lib/**/*.fy
-do
-  args="com ${file##$dir/lib/} /dev/null"
-  try
-done
-echo " - All lib files compile"
 for file in $dir/tests/*.fy $dir/tests/**/*.fy
 do
   file=${file##$dir/tests/}

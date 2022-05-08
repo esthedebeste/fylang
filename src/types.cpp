@@ -11,7 +11,6 @@ enum TypeType : int {
   Array,
   Struct,
   Tuple,
-  String
 };
 static std::string tt_to_str(TypeType tt) {
   switch (tt) {
@@ -29,8 +28,6 @@ static std::string tt_to_str(TypeType tt) {
     return "struct";
   case Tuple:
     return "tuple";
-  case String:
-    return "string";
   }
   error("Unknown TypeType");
 };
@@ -267,6 +264,19 @@ public:
       h ^= hash(f.first) ^ hash(f.second);
     return h ^ hash(fields.size()) ^ hash(TypeType::Struct);
   }
+  bool eq(Type *other) {
+    if (StructType *other_s = dynamic_cast<StructType *>(other)) {
+      if (other_s->fields.size() != fields.size())
+        return false;
+      for (size_t i = 0; i < fields.size(); i++)
+        if (other_s->fields[i].first != fields[i].first ||
+            other_s->fields[i].second->neq(fields[i].second))
+          return false;
+      return true;
+    } else if (TupleType *other_s = dynamic_cast<TupleType *>(other))
+      return TupleType::eq(other);
+    return false;
+  }
   std::string stringify() {
     std::stringstream res;
     res << "{ ";
@@ -285,6 +295,12 @@ public:
   NamedStructType(std::string name,
                   std::vector<std::pair<std::string, Type *>> fields)
       : name(name), StructType(fields) {}
+  bool eq(Type *other) {
+    if (NamedStructType *other_s = dynamic_cast<NamedStructType *>(other))
+      if (other_s->name != name)
+        return false;
+    return StructType::eq(other);
+  }
   std::string stringify() { return name; }
 };
 class FunctionType : public Type {
@@ -338,20 +354,4 @@ template <> struct std::equal_to<FunctionType *> {
   size_t operator()(FunctionType *a, FunctionType *b) const noexcept {
     return a->eq(b);
   }
-};
-class StringType : public NamedStructType {
-public:
-  StringType()
-      : NamedStructType(
-            "String", {{"chars", new PointerType(new NumType(8, false, false))},
-                       {"length", new NumType(false)}}) {}
-  TypeType type_type() { return TypeType::String; }
-  bool eq(Type *other) { return other->type_type() == TypeType::String; }
-  bool castable_to(Type *other) {
-    if (PointerType *other_ptr = dynamic_cast<PointerType *>(other))
-      return other_ptr->get_points_to()->eq(new NumType(8, false, false));
-    return other->type_type() == TypeType::String;
-  }
-  std::string stringify() { return "String"; }
-  size_t _hash() { return hash(TypeType::String); }
 };
