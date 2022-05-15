@@ -245,7 +245,10 @@ public:
       if (value->is_constant()) {
         LLVMValueRef val = value->gen_value()->cast_to(type)->gen_val();
         LLVMSetInitializer(ptr, val);
-        curr_scope->set_variable(id, new ConstValue(type, val));
+        if (constant)
+          curr_scope->set_variable(id, new ConstValue(type, val));
+        else
+          curr_scope->set_variable(id, new BasicLoadValue(type, ptr));
       } else {
         LLVMSetInitializer(ptr, LLVMConstNull(type->llvm_type()));
         add_store_before_main(ptr, new CastExprAST(value, type_ast(type)));
