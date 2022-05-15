@@ -6,6 +6,7 @@ static std::string
     identifier_string;  // [a-zA-Z][a-zA-Z0-9]* - Filled in if T_IDENTIFIER
 static char char_value; // '[^']' - Filled in if T_CHAR
 static std::string num_value; // Filled in if T_NUMBER
+static uint num_base;         // Filled in if T_NUMBER
 static bool
     num_has_dot;      // Whether num_value contains '.' - Filled in if T_NUMBER
 static char num_type; // Type of number. 'd' => double, 'f' => float, 'i' =>
@@ -14,7 +15,7 @@ static std::string string_value; // "[^"]*" - Filled in if T_STRING
 static enum {
   C_STRING,
   CHAR_ARRAY
-} string_type; // Type of string. 'c' => C-string, 's' => char[len]
+} string_type; // Type of string. 'c' => C-string, otherwise char[len]
 
 std::string token_to_str(const int token) {
   switch (token) {
@@ -85,7 +86,36 @@ static int next_token() {
   } else if (isdigit(last_char)) {
     // Number: [0-9]+.?[0-9]*
     num_has_dot = false;
-    num_value = read_str(&is_numish);
+    size_t index = 0;
+    bool started_with_zero = last_char == '0';
+    std::stringstream stream;
+    stream << last_char;
+    last_char = next_char();
+    if (last_char != 'x' && last_char != 'b' && last_char != 'o' &&
+        last_char != '.' && !isdigit(last_char))
+      goto num_ret;
+    num_base = 10;
+    if (started_with_zero) {
+      if (last_char == 'x')
+        num_base = 16;
+      else if (last_char == 'b')
+        num_base = 2;
+      else if (last_char == 'o')
+        num_base = 8;
+      else if (isdigit(last_char))
+        stream << last_char; // 020 = 20 decimal
+      else
+        error("Invalid number");
+      last_char = next_char();
+    }
+    while (true) {
+      if (!isxdigit(last_char))
+        break; // trust user to not use invalid chars for numbers, todo: check
+      stream << last_char;
+      last_char = next_char();
+    }
+  num_ret:
+    num_value = stream.str();
     if (last_char == 'd' || last_char == 'l' || last_char == 'f' ||
         last_char == 'i' || last_char == 'u' || last_char == 'b') {
       num_type = last_char;
@@ -135,12 +165,12 @@ static int next_token() {
 
   int curr_char = last_char;
   last_char = next_char();
-  if (last_char == '=') // ==, <=, >=, !=
 #define eq_case(ch, token)                                                     \
   case ch:                                                                     \
     last_char = next_char();                                                   \
     return token
 
+  if (last_char == '=') // ==, <=, >=, !=
     switch (curr_char) {
       eq_case('=', T_EQEQ);
       eq_case('<', T_LEQ);
@@ -153,19 +183,16 @@ static int next_token() {
       eq_case('%', T_PERCENTEQ);
       eq_case('&', T_ANDEQ);
       eq_case('|', T_OREQ);
-#undef eq_case
     }
-
-  if (curr_char == '|' && last_char == '|') // ||
-  {
-    last_char = next_char();
-    return T_LOR;
-  }
-  if (curr_char == '&' && last_char == '&') // &&
-  {
-    last_char = next_char();
-    return T_LAND;
-  }
+  if (curr_char == last_char)
+    switch (curr_char) {
+      eq_case('=', T_EQEQ);
+      eq_case('|', T_LOR);
+      eq_case('&', T_LAND);
+      eq_case('<', T_LSHIFT);
+      eq_case('>', T_RSHIFT);
+    }
+#undef eq_case
   if (curr_char == '/') {
     if (last_char == '/') {
       // Comment: //[^\n\r]*

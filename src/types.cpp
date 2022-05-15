@@ -71,10 +71,12 @@ public:
     byte_size = bits / 8;
   }
   // Pointer-size
-  NumType(bool is_signed) : is_floating(false), is_signed(is_signed) {
+  explicit NumType(bool is_signed) : is_floating(false), is_signed(is_signed) {
     byte_size = LLVMPointerSize(target_data);
     bits = byte_size * 8;
   }
+  // exists for maps, do not use.
+  explicit NumType() {}
   LLVMTypeRef llvm_type() {
     if (!is_floating)
       return LLVMIntType(bits);

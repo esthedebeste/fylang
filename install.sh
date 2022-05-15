@@ -1,6 +1,6 @@
 set +e
 cmake -B ./build . -DCMAKE_BUILD_TYPE=Release
-cmake --build ./build
+cmake --build ./build --config Release
 mkdir ~/.fy/bin -p
 sudo cp ./build/fy ~/.fy/bin/
 sudo rm ~/.fy/lib -rf

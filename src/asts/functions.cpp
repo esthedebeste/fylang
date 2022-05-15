@@ -170,7 +170,6 @@ public:
         LLVMBuildCall2(curr_builder, type->llvm_type(), declaration->func,
                        llvm_args, arg_vals.size(), ("call_" + name).c_str());
     if (body && !LLVMGetFirstBasicBlock(declaration->func)) {
-      LLVMSetFunctionCallConv(declaration->func, LLVMFastCallConv);
       LLVMSetLinkage(declaration->func, LLVMInternalLinkage);
       size_t prev_unnamed = unnamed_acc;
       unnamed_acc = 0;

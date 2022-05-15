@@ -14,6 +14,15 @@ static void eat(const int expected_token) {
           token_to_str(expected_token) + "'");
   get_next_token();
 }
+static std::string eat_string() {
+  std::string ret = string_value;
+  eat(T_STRING);
+  while (curr_token == T_STRING) {
+    ret += string_value; // concatenate strings
+    eat(T_STRING);
+  }
+  return ret;
+}
 static ExprAST *parse_expr();
 static ExprAST *parse_primary();
 static ExprAST *parse_unary();
@@ -27,18 +36,16 @@ static TypeAST *parse_function_type() {
   eat('(');
   std::vector<TypeAST *> arg_types;
   bool vararg = false;
-  if (curr_token != ')') {
-    while (1) {
-      if (curr_token == T_VARARG) {
-        eat(T_VARARG);
-        vararg = true;
-        break;
-      }
-      arg_types.push_back(parse_type());
-      if (curr_token == ')')
-        break;
-      eat(',');
+  while (curr_token != ')') {
+    if (curr_token == T_VARARG) {
+      eat(T_VARARG);
+      vararg = true;
+      break;
     }
+    arg_types.push_back(parse_type());
+    if (curr_token == ')')
+      break;
+    eat(',');
   }
   eat(')');
   eat(':');
@@ -62,7 +69,7 @@ static TypeAST *parse_num_type() {
   else if (curr_token == '<') {
     eat('<');
     std::vector<TypeAST *> args;
-    while (true) {
+    while (curr_token != '>') {
       args.push_back(parse_type());
       if (curr_token == '>')
         break;
@@ -85,7 +92,7 @@ static TypeDefAST *parse_type_definition() {
   if (curr_token == '<') {
     is_generic = true;
     eat('<');
-    while (true) {
+    while (curr_token != '>') {
       generics.push_back(identifier_string);
       eat(T_IDENTIFIER);
       if (curr_token == '>')
@@ -108,9 +115,7 @@ static TypeAST *parse_inline_struct_type(std::string first_name) {
   eat(':');
   auto first_type = parse_type();
   fields.push_back(std::make_pair(first_name, first_type));
-  while (true) {
-    if (curr_token == '}')
-      break;
+  while (curr_token != '}') {
     eat(',');
     std::string name = identifier_string;
     eat(T_IDENTIFIER);
@@ -124,20 +129,19 @@ static TypeAST *parse_inline_struct_type(std::string first_name) {
 static TypeAST *parse_tuple_type() {
   eat('{');
   std::vector<TypeAST *> types;
-  if (curr_token != '}')
-    while (1) {
-      auto type = parse_type();
-      if (curr_token == ':') {
-        if (auto named = dynamic_cast<NamedTypeAST *>(type))
-          return parse_inline_struct_type(named->name);
-        else
-          error("Unexpected : in tuple type");
-      }
-      types.push_back(type);
-      if (curr_token == '}')
-        break;
-      eat(',');
+  while (curr_token != '}') {
+    auto type = parse_type();
+    if (curr_token == ':') {
+      if (auto named = dynamic_cast<NamedTypeAST *>(type))
+        return parse_inline_struct_type(named->name);
+      else
+        error("Unexpected : in tuple type");
     }
+    types.push_back(type);
+    if (curr_token == '}')
+      break;
+    eat(',');
+  }
   eat('}');
   return new TupleTypeAST(types);
 }
@@ -170,7 +174,7 @@ static TypeAST *parse_primary_type() {
 }
 static TypeAST *parse_type_postfix() {
   TypeAST *prev = parse_primary_type();
-  while (1) {
+  while (true) {
     switch (curr_token) {
     case '[': {
       eat('[');
@@ -184,12 +188,12 @@ static TypeAST *parse_type_postfix() {
         eat(']');
         prev = new GenericArrayTypeAST(prev, name);
       } else {
-        std::string num = num_value;
+        uint len = std::stoi(num_value, nullptr, num_base);
         if (num_has_dot)
           error("List lengths have to be integers");
         eat(T_NUMBER);
         eat(']');
-        prev = new ArrayTypeAST(prev, std::stoi(num));
+        prev = new ArrayTypeAST(prev, len);
       }
       break;
     }
@@ -226,8 +230,7 @@ static TypeAST *parse_type_unary() {
   return new UnaryTypeAST(opc, operand);
 }
 static ExprAST *parse_number_expr() {
-  // TODO: parse number base (hex 0x, binary 0b, octal 0o)
-  auto result = new NumberExprAST(num_value, num_type, num_has_dot, 10);
+  auto result = new NumberExprAST(num_value, num_type, num_has_dot, num_base);
   eat(T_NUMBER);
   return result;
 }
@@ -237,11 +240,12 @@ static ExprAST *parse_char_expr() {
   return result;
 }
 static ExprAST *parse_string_expr() {
-  auto result = string_type == C_STRING
-                    ? (ExprAST *)new CStringExprAST(string_value)
-                    : (ExprAST *)new StringExprAST(string_value);
-  eat(T_STRING);
-  return result;
+  auto type = string_type;
+  std::string str = eat_string();
+  if (string_type == C_STRING)
+    return new CStringExprAST(string_value);
+  else
+    return new StringExprAST(string_value);
 }
 /// parenexpr ::= '(' expression ')'
 static ExprAST *parse_paren_expr() {
@@ -253,13 +257,12 @@ static ExprAST *parse_paren_expr() {
     eat(',');
     std::vector<ExprAST *> exprs;
     exprs.push_back(expr);
-    if (curr_token != ')')
-      while (1) {
-        exprs.push_back(parse_expr());
-        if (curr_token == ')')
-          break;
-        eat(',');
-      }
+    while (curr_token != ')') {
+      exprs.push_back(parse_expr());
+      if (curr_token == ')')
+        break;
+      eat(',');
+    }
     eat(')');
     return new TupleExprAST(exprs);
   }
@@ -358,17 +361,16 @@ static ExprAST *parse_new_expr() {
   auto type = parse_primary_type();
   std::vector<std::pair<std::string, ExprAST *>> fields;
   eat('{');
-  if (curr_token != '}')
-    while (1) {
-      std::string key = identifier_string;
-      eat(T_IDENTIFIER);
-      eat('=');
-      auto value = parse_expr();
-      fields.push_back(std::make_pair(key, value));
-      if (curr_token == '}')
-        break;
-      eat(',');
-    }
+  while (curr_token != '}') {
+    std::string key = identifier_string;
+    eat(T_IDENTIFIER);
+    eat('=');
+    auto value = parse_expr();
+    fields.push_back(std::make_pair(key, value));
+    if (curr_token == '}')
+      break;
+    eat(',');
+  }
   eat('}');
 
   return new NewExprAST(type, fields, is_new);
@@ -443,6 +445,45 @@ static ExprAST *parse_type_dump() {
   TypeAST *a = parse_type();
   return new TypeDumpExprAST(a);
 }
+
+static auto parse_asm_expr_params() {
+  std::vector<std::pair<std::string, ExprAST *>> params;
+  eat('(');
+  while (curr_token != ')') {
+    std::string reg = identifier_string;
+    eat(T_IDENTIFIER);
+    eat('=');
+    auto value = parse_expr();
+    params.push_back(std::make_pair(reg, value));
+    if (curr_token == ')')
+      break;
+    eat(',');
+  }
+  eat(')');
+  return params;
+}
+// asmexpr ::= '__asm__' type '(' asm_str '=>' reg ')' '(' (reg '=' expr)* ')'
+static ExprAST *parse_asm_expr() {
+  eat(T_ASM);
+  if (curr_token == '(') {
+    // side effect asm
+    eat('(');
+    std::string asm_str = eat_string();
+    eat(')');
+    auto args = parse_asm_expr_params();
+    return new ASMExprAST(asm_str, args);
+  }
+  TypeAST *type = parse_type();
+  eat('(');
+  std::string asm_str = eat_string();
+  eat('=');
+  eat('>');
+  std::string output_reg = identifier_string;
+  eat(T_IDENTIFIER);
+  eat(')');
+  auto args = parse_asm_expr_params();
+  return new ASMExprAST(type, asm_str, output_reg, args);
+}
 /// primary
 ///   ::= identifierexpr
 ///   ::= numberexpr
@@ -486,6 +527,8 @@ static ExprAST *parse_primary() {
     return parse_type_dump();
   case T_ASSERT_TYPE:
     return parse_type_assertion();
+  case T_ASM:
+    return parse_asm_expr();
   case '{':
     return parse_block();
   }
@@ -504,27 +547,25 @@ static int get_token_precedence() {
 std::vector<ExprAST *> parse_call() {
   eat('(');
   std::vector<ExprAST *> args;
-  if (curr_token != ')') {
-    while (1) {
-      args.push_back(parse_expr());
-      if (curr_token == ')')
-        break;
-      eat(',');
-    }
+  while (curr_token != ')') {
+    args.push_back(parse_expr());
+    if (curr_token == ')')
+      break;
+    eat(',');
   }
   eat(')');
   return args;
 }
 static ExprAST *parse_postfix() {
   ExprAST *prev = parse_primary();
-  while (1)
+  while (true)
     switch (curr_token) {
     default:
       return prev;
     case '.': {
       eat('.');
       if (curr_token == T_NUMBER) {
-        unsigned int idx = std::stoi(num_value);
+        uint idx = std::stoi(num_value, nullptr, num_base);
         eat(T_NUMBER);
         prev = new NumAccessExprAST(idx, prev);
       } else {
@@ -703,7 +744,7 @@ static TypeDefAST *parse_struct() {
   if (curr_token == '<') {
     is_generic = true;
     eat('<');
-    while (true) {
+    while (curr_token != '>') {
       generic_params.push_back(identifier_string);
       eat(T_IDENTIFIER);
       if (curr_token == '>')
@@ -714,17 +755,16 @@ static TypeDefAST *parse_struct() {
   }
   eat('{');
   std::vector<std::pair<std::string, TypeAST *>> members;
-  if (curr_token != '}')
-    while (1) {
-      std::string member_name = identifier_string;
-      eat(T_IDENTIFIER);
-      eat(':');
-      TypeAST *member_type = parse_type();
-      members.push_back(std::make_pair(member_name, member_type));
-      if (curr_token == '}')
-        break;
-      eat(',');
-    }
+  while (curr_token != '}') {
+    std::string member_name = identifier_string;
+    eat(T_IDENTIFIER);
+    eat(':');
+    TypeAST *member_type = parse_type();
+    members.push_back(std::make_pair(member_name, member_type));
+    if (curr_token == '}')
+      break;
+    eat(',');
+  }
   eat('}');
   if (is_generic)
     return new GenericTypeDefAST(struct_name, generic_params,
@@ -734,7 +774,7 @@ static TypeDefAST *parse_struct() {
                                   new NamedStructTypeAST(struct_name, members));
 }
 
-/// include ::= 'include' string_expr
+/// include ::= 'include' string, make sure to eat(T_STRING) after calling!
 static std::string parse_include() {
   eat(T_INCLUDE);
   std::string path = string_value;

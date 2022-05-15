@@ -45,6 +45,8 @@ enum Token : const int {
   T_NEQ,           // !=
   T_LOR,           // ||
   T_LAND,          // &&
+  T_LSHIFT,        // <<
+  T_RSHIFT,        // >>
   T_INCLUDE,       // include
   T_TYPE,          // type
   T_UNSIGNED,      // unsigned
@@ -68,6 +70,7 @@ enum Token : const int {
   T_ASSERT_TYPE,   // ASSERT_TYPE
   T_GENERIC,       // generic
   T_INLINE,        // inline
+  T_ASM,           // __asm__
 };
 
 static LLVMContextRef curr_ctx;
@@ -76,19 +79,20 @@ static LLVMModuleRef curr_module;
 static LLVMTargetDataRef target_data;
 static std::unordered_map<int, int> binop_precedence = {
 #define assign_prec 1
-    {'=', 1},       {T_PLUSEQ, 1},    {T_MINEQ, 1}, {T_STAREQ, 1},
-    {T_SLASHEQ, 1}, {T_PERCENTEQ, 1}, {T_ANDEQ, 1}, {T_OREQ, 1},
+    {'=', 1},       {T_PLUSEQ, 1},    {T_MINEQ, 1},   {T_STAREQ, 1},
+    {T_SLASHEQ, 1}, {T_PERCENTEQ, 1}, {T_ANDEQ, 1},   {T_OREQ, 1},
 #define logical_prec 5
     {T_LOR, 5},     {T_LAND, 5},
 #define comparison_prec 10
-    {'<', 10},      {'>', 10},        {T_EQEQ, 10}, {T_LEQ, 10},
+    {'<', 10},      {'>', 10},        {T_EQEQ, 10},   {T_LEQ, 10},
     {T_GEQ, 10},    {T_NEQ, 10},
 #define add_prec 20
     {'+', 20},      {'-', 20},
 #define mul_prec 40
     {'*', 40},      {'/', 40},        {'%', 40},
 #define binary_op_prec 60
-    {'&', 60},      {'|', 60}};
+    {'&', 60},      {'|', 60},        {T_LSHIFT, 60}, {T_RSHIFT, 60},
+};
 
 // += to +, -= to -, etc.
 static std::unordered_map<int, int> op_eq_ops = {
@@ -119,6 +123,8 @@ static std::unordered_map<Token, std::string> token_strs = {
     {T_NEQ, "!="},
     {T_LOR, "||"},
     {T_LAND, "&&"},
+    {T_LSHIFT, "<<"},
+    {T_RSHIFT, ">>"},
     {T_INCLUDE, "include"},
     {T_TYPE, "type"},
     {T_UNSIGNED, "unsigned"},
@@ -142,6 +148,7 @@ static std::unordered_map<Token, std::string> token_strs = {
     {T_ASSERT_TYPE, "ASSERT_TYPE"},
     {T_GENERIC, "generic"},
     {T_INLINE, "inline"},
+    {T_ASM, "__asm__"},
 };
 static std::unordered_map<std::string, Token> keywords = {
     {"if", T_IF},
@@ -171,6 +178,7 @@ static std::unordered_map<std::string, Token> keywords = {
     {"ASSERT_TYPE", T_ASSERT_TYPE},
     {"generic", T_GENERIC},
     {"inline", T_INLINE},
+    {"__asm__", T_ASM},
 };
 
 static std::unordered_set<int> unaries = {'!', '*', '&', '+', '-', T_RETURN};

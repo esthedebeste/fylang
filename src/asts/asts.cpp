@@ -40,14 +40,14 @@ Scope *pop_scope();
 
 Scope *pop_scope() {
   for (auto &[name, value] : curr_scope->named_variables) {
-    LLVMValueRef llvm_val = value->gen_val();
     Type *type = value->get_type();
-    if (!llvm_val) // type phase
-      continue;
-    ConstValue val = ConstValue(type, llvm_val);
     FunctionAST *destructor = type->get_destructor();
     if (!destructor)
       continue;
+    LLVMValueRef llvm_val = value->gen_val();
+    if (!llvm_val) // type phase
+      continue;
+    ConstValue val = ConstValue(type, llvm_val);
     destructor->gen_call({&val});
   }
   return curr_scope = curr_scope->parent_scope;
@@ -77,31 +77,20 @@ inline Value *build_malloc(Type *type) {
                         "malloc_" + type->stringify());
 }
 
+std::unordered_map<char, NumType> num_type_chars = {
+    {'b', NumType(8, false, false)}, {'d', NumType(64, true, true)},
+    {'f', NumType(32, true, true)},  {'i', NumType(32, false, true)},
+    {'l', NumType(64, false, true)}, {'u', NumType(32, false, false)},
+};
 NumType num_char_to_type(char type_char, bool has_dot) {
-  switch (type_char) {
-  case 'd':
-    return NumType(64, true, true);
-  case 'f':
-    return NumType(32, true, true);
-  case 'i':
-    if (has_dot)
-      error("'i' (int32) type can't have a '.'");
-    return NumType(32, false, true);
-  case 'u':
-    if (has_dot)
-      error("'u' (uint32) type can't have a '.'");
-    return NumType(32, false, false);
-  case 'l':
-    if (has_dot)
-      error("'l' (long, int64) type can't have a '.'");
-    return NumType(64, false, true);
-  case 'b':
-    if (has_dot)
-      error("'b' (byte, uint8) type can't have a '.'");
-    return NumType(8, false, false);
-  default:
-    error("Invalid number type id '" + std::string(1, type_char) + "'");
-  }
+  if (num_type_chars.count(type_char) == 0)
+    error((std::string) "Invalid number type id '" + type_char + "'/"
+          << (int)type_char);
+  auto &num_type = num_type_chars[type_char];
+  if (has_dot && !num_type.is_floating)
+    error((std::string) "'" + type_char + "' (" + num_type.stringify() +
+          ") type can't have decimals");
+  return num_type;
 }
 /// NumberExprAST - Expression class for numeric literals like "1.0".
 class NumberExprAST : public ExprAST {
@@ -117,7 +106,11 @@ public:
                 unsigned int base)
       : base(base), type(num_char_to_type(type_char, has_dot)) {
     if (type.is_floating)
-      value.floating = std::stold(val);
+      if (base != 10)
+        error("floating-point numbers with a base that isn't decimal aren't "
+              "supported.");
+      else
+        value.floating = std::stold(val);
     else
       value.integer = std::stoull(val, nullptr, base);
   }
@@ -128,12 +121,8 @@ public:
   Type *get_type() { return &type; }
   Value *gen_value() {
     if (type.is_floating)
-      if (base != 10) {
-        error("floating-point numbers with a base that isn't decimal aren't "
-              "supported.");
-      } else
-        return new ConstValue(&type,
-                              LLVMConstReal(type.llvm_type(), value.floating));
+      return new ConstValue(&type,
+                            LLVMConstReal(type.llvm_type(), value.floating));
     else
       return new IntValue(type, value.integer);
   }
@@ -407,6 +396,10 @@ LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
     case T_LOR:
     case '|':
       return LLVMBuildOr(curr_builder, L, R, UN);
+    case T_LSHIFT:
+      return LLVMBuildShl(curr_builder, L, R, UN);
+    case T_RSHIFT:
+      return LLVMBuildAShr(curr_builder, L, R, UN);
     case '<':
       return LLVMBuildICmp(curr_builder, is_signed ? LLVMIntSLT : LLVMIntULT, L,
                            R, UN);
@@ -634,6 +627,57 @@ public:
     return new ConstValue(func_t->return_type,
                           LLVMBuildCall2(curr_builder, func_t->llvm_type(),
                                          func, arg_vs, args.size(), UN));
+  }
+};
+
+/// ASMExprAST - Inline assembly
+class ASMExprAST : public ExprAST {
+  TypeAST *type_ast;
+  std::string asm_str;
+  bool has_output;
+  std::string out_reg;
+  std::vector<std::pair<std::string, ExprAST *>> args;
+
+public:
+  ASMExprAST(TypeAST *type_ast, std::string asm_str, std::string out_reg,
+             std::vector<std::pair<std::string, ExprAST *>> args)
+      : type_ast(type_ast), asm_str(asm_str), has_output(true),
+        out_reg(out_reg), args(args) {}
+  ASMExprAST(std::string asm_str,
+             std::vector<std::pair<std::string, ExprAST *>> args)
+      : asm_str(asm_str), has_output(false), args(args) {}
+
+  Type *get_type() { return has_output ? type_ast->type() : new NullType(); }
+  Value *gen_value() {
+    LLVMValueRef *arg_vs = new LLVMValueRef[args.size()];
+    LLVMTypeRef *arg_ts = new LLVMTypeRef[args.size()];
+    std::vector<std::string> constraints;
+    if (has_output)
+      constraints.push_back("={" + out_reg + "}");
+    for (size_t i = 0; i < args.size(); i++) {
+      arg_vs[i] = args[i].second->gen_value()->gen_val();
+      arg_ts[i] = args[i].second->get_type()->llvm_type();
+      constraints.push_back("{" + args[i].first + "}");
+    }
+    std::string constraints_str = "";
+    for (size_t i = 0; i < constraints.size(); i++) {
+      if (i != 0)
+        constraints_str += ",";
+      constraints_str += constraints[i];
+    }
+    Type *type = has_output ? type_ast->type() : new NullType();
+    LLVMTypeRef functy =
+        LLVMFunctionType(has_output ? type->llvm_type() : LLVMVoidType(),
+                         arg_ts, args.size(), false);
+    LLVMValueRef inline_asm =
+        LLVMGetInlineAsm(functy, asm_str.data(), asm_str.size(),
+                         constraints_str.data(), constraints_str.size(),
+                         /* has side effects */ !has_output, false,
+                         LLVMInlineAsmDialectATT, false);
+    LLVMValueRef call = LLVMBuildCall2(curr_builder, functy, inline_asm, arg_vs,
+                                       args.size(), has_output ? UN : "");
+    return new ConstValue(
+        type, has_output ? call : LLVMConstNull(NullType().llvm_type()));
   }
 };
 
