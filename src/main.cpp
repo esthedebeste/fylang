@@ -41,7 +41,7 @@ static void handle_global_include() {
   }
   CharReader *curr_file = queue.back();
   add_file_to_queue(curr_file->file_path, file_name);
-  get_next_token();
+  eat(T_STRING);
 }
 
 static void main_loop() {
