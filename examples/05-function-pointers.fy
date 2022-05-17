@@ -3,7 +3,7 @@ include "std/utils"
 
 // in arguments, functions can be annotated as
 // `*fun(arg_type1, arg_type2, ...): return_type`
-fun print_filtered(str: *char, length: uint_ptrsize, predicate: *fun(char): bool) {
+fun print_filtered(str: *char, length: uint_ptrsize, predicate: *fun(ch: char): bool) {
 	for(let i = 0; i < length; i += 1) {
 		const char = str[i]
 		if(predicate(char))

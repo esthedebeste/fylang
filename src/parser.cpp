@@ -42,7 +42,13 @@ static TypeAST *parse_function_type() {
       vararg = true;
       break;
     }
-    arg_types.push_back(parse_type());
+    auto type = parse_type();
+    if (curr_token == ':' && dynamic_cast<NamedTypeAST *>(type)) {
+      eat(':');
+      // allow type: fun(a: int, b: int) by ignoring what's before the :
+      type = parse_type();
+    }
+    arg_types.push_back(type);
     if (curr_token == ')')
       break;
     eat(',');
@@ -250,8 +256,10 @@ static ExprAST *parse_string_expr() {
 /// parenexpr ::= '(' expression ')'
 static ExprAST *parse_paren_expr() {
   eat('(');
-  if (curr_token == ')')
+  if (curr_token == ')') {
+    eat(')');
     return new TupleExprAST({}); // empty tuple
+  }
   auto expr = parse_expr();
   if (curr_token == ',') {
     eat(',');

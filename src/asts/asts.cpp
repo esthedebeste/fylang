@@ -1162,10 +1162,14 @@ public:
   ForExprAST(ExprAST *init, ExprAST *cond, ExprAST *body, ExprAST *post,
              ExprAST *elze)
       : init(init), post(post), IfExprAST(cond, body, elze) {}
-  Value *gen_value() {
-    IfExprAST::init();
-    init->gen_value(); // let i = 0
 
+  Type *get_type() {
+    init->get_type();
+    return IfExprAST::get_type();
+  }
+  Value *gen_value() {
+    init->gen_value(); // let i = 0
+    IfExprAST::init();
     // cast to bool
     LLVMValueRef cond_v =
         cond->gen_value()->cast_to(new NumType(1, false, false))->gen_val();

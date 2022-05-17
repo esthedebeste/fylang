@@ -86,14 +86,10 @@ static int next_token() {
   } else if (isdigit(last_char)) {
     // Number: [0-9]+.?[0-9]*
     num_has_dot = false;
-    size_t index = 0;
     bool started_with_zero = last_char == '0';
     std::stringstream stream;
     stream << last_char;
     last_char = next_char();
-    if (last_char != 'x' && last_char != 'b' && last_char != 'o' &&
-        last_char != '.' && !isdigit(last_char))
-      goto num_ret;
     num_base = 10;
     if (started_with_zero) {
       if (last_char == 'x')
@@ -102,19 +98,20 @@ static int next_token() {
         num_base = 2;
       else if (last_char == 'o')
         num_base = 8;
-      else if (isdigit(last_char))
-        stream << last_char; // 020 = 20 decimal
       else
-        error("Invalid number");
+        goto num_while;
       last_char = next_char();
     }
+  num_while:
     while (true) {
-      if (!isxdigit(last_char))
-        break; // trust user to not use invalid chars for numbers, todo: check
+      if (num_base == 16   ? !isxdigit(last_char)
+          : num_base == 10 ? !isdigit(last_char)
+          : num_base == 8  ? last_char < '0' || last_char > '7'
+                           : last_char < '0' || last_char > '1')
+        break;
       stream << last_char;
       last_char = next_char();
     }
-  num_ret:
     num_value = stream.str();
     if (last_char == 'd' || last_char == 'l' || last_char == 'f' ||
         last_char == 'i' || last_char == 'u' || last_char == 'b') {
