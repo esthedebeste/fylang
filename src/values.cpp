@@ -29,7 +29,9 @@ public:
   NumType type;
   IntValue(NumType type, uint64_t val) : type(type), val(val) {}
   Type *get_type() { return &type; };
-  LLVMValueRef gen_val() { return LLVMConstInt(type.llvm_type(), val, false); };
+  LLVMValueRef gen_val() {
+    return LLVMConstInt(type.llvm_type(), val, type.is_signed);
+  };
   LLVMValueRef gen_ptr() { error("Int values can't be pointered"); };
   bool has_ptr() { return false; }
 };

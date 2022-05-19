@@ -133,22 +133,22 @@ class FunctionTypeAST : public TypeAST {
 public:
   TypeAST *return_type;
   std::vector<TypeAST *> args;
-  bool vararg;
+  FuncFlags flags;
 
   FunctionTypeAST(TypeAST *return_type, std::vector<TypeAST *> args,
-                  bool vararg)
-      : return_type(return_type), args(args), vararg(vararg) {}
+                  FuncFlags flags)
+      : return_type(return_type), args(args), flags(flags) {}
   FunctionType *func_type() {
     std::vector<Type *> arg_types;
     for (auto arg : args)
       arg_types.push_back(arg->type());
     return new FunctionType(return_type ? return_type->type() : nullptr,
-                            arg_types, vararg);
+                            arg_types, flags);
   }
   Type *type() { return func_type(); }
   bool eq(TypeAST *other) {
     FunctionTypeAST *f = dynamic_cast<FunctionTypeAST *>(other);
-    if (f == nullptr || args.size() != f->args.size() || vararg != f->vararg)
+    if (f == nullptr || args.size() != f->args.size() || flags.neq(f->flags))
       return false;
     for (size_t i = 0; i < args.size(); i++)
       if (!args[i]->eq(f->args[i]))
@@ -157,7 +157,7 @@ public:
   }
   bool match(Type *type, uint *g) {
     if (FunctionType *f = dynamic_cast<FunctionType *>(type)) {
-      if (args.size() != f->arguments.size() || vararg != f->vararg)
+      if (args.size() != f->arguments.size() || flags.neq(f->flags))
         return false;
       for (size_t i = 0; i < args.size(); i++)
         if (!args[i]->match(f->arguments[i], g))

@@ -1,8 +1,10 @@
 #pragma once
+#include <codecvt>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits.h>
+#include <locale>
 #include <math.h>
 #include <sstream>
 #include <stdlib.h>
@@ -183,3 +185,7 @@ static std::unordered_map<std::string, Token> keywords = {
 
 static std::unordered_set<int> unaries = {'!', '*', '&', '+', '-', T_RETURN};
 static std::unordered_set<int> type_unaries = {'*', '&', T_UNSIGNED, T_SIGNED};
+
+// clang-format off
+static std::unordered_map<std::string, LLVMCallConv> call_convs = {{"C", LLVMCCallConv}, {"Fast", LLVMFastCallConv}, {"Cold", LLVMColdCallConv}, {"GHC", LLVMGHCCallConv}, {"HiPE", LLVMHiPECallConv}, {"WebKitJS", LLVMWebKitJSCallConv}, {"AnyReg", LLVMAnyRegCallConv}, {"PreserveMost", LLVMPreserveMostCallConv}, {"PreserveAll", LLVMPreserveAllCallConv}, {"Swift", LLVMSwiftCallConv}, {"CXXFASTTLS", LLVMCXXFASTTLSCallConv}, {"X86Stdcall", LLVMX86StdcallCallConv}, {"X86Fastcall", LLVMX86FastcallCallConv}, {"ARMAPCS", LLVMARMAPCSCallConv}, {"ARMAAPCS", LLVMARMAAPCSCallConv}, {"ARMAAPCSVFP", LLVMARMAAPCSVFPCallConv}, {"MSP430INTR", LLVMMSP430INTRCallConv}, {"X86ThisCall", LLVMX86ThisCallCallConv}, {"PTXKernel", LLVMPTXKernelCallConv}, {"PTXDevice", LLVMPTXDeviceCallConv}, {"SPIRFUNC", LLVMSPIRFUNCCallConv}, {"SPIRKERNEL", LLVMSPIRKERNELCallConv}, {"IntelOCLBI", LLVMIntelOCLBICallConv}, {"X8664SysV", LLVMX8664SysVCallConv}, {"Win64", LLVMWin64CallConv}, {"X86VectorCall", LLVMX86VectorCallCallConv}, {"HHVM", LLVMHHVMCallConv}, {"HHVMC", LLVMHHVMCCallConv}, {"X86INTR", LLVMX86INTRCallConv}, {"AVRINTR", LLVMAVRINTRCallConv}, {"AVRSIGNAL", LLVMAVRSIGNALCallConv}, {"AVRBUILTIN", LLVMAVRBUILTINCallConv}, {"AMDGPUVS", LLVMAMDGPUVSCallConv}, {"AMDGPUGS", LLVMAMDGPUGSCallConv}, {"AMDGPUPS", LLVMAMDGPUPSCallConv}, {"AMDGPUCS", LLVMAMDGPUCSCallConv}, {"AMDGPUKERNEL", LLVMAMDGPUKERNELCallConv}, {"X86RegCall", LLVMX86RegCallCallConv}, {"AMDGPUHS", LLVMAMDGPUHSCallConv}, {"MSP430BUILTIN", LLVMMSP430BUILTINCallConv}, {"AMDGPULS", LLVMAMDGPULSCallConv}, {"AMDGPUES", LLVMAMDGPUESCallConv}};
+// clang-format on

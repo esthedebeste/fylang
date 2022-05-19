@@ -278,6 +278,18 @@ public:
   NamedStructType(std::string name,
                   std::vector<std::pair<std::string, Type *>> fields)
       : name(name), StructType(fields) {}
+  bool gave_name = false;
+  LLVMTypeRef llvm_type() {
+    if (!gave_name) {
+      llvm_struct_type = LLVMStructCreateNamed(curr_ctx, name.c_str());
+      LLVMTypeRef *llvm_types = new LLVMTypeRef[fields.size()];
+      for (size_t i = 0; i < fields.size(); i++)
+        llvm_types[i] = fields[i].second->llvm_type();
+      LLVMStructSetBody(llvm_struct_type, llvm_types, fields.size(), true);
+      gave_name = true;
+    }
+    return llvm_struct_type;
+  }
   bool eq(Type *other) {
     if (NamedStructType *other_s = dynamic_cast<NamedStructType *>(other))
       if (other_s->name != name)
@@ -290,16 +302,17 @@ class FunctionType : public Type {
 public:
   Type *return_type;
   std::vector<Type *> arguments;
-  bool vararg;
+  FuncFlags flags;
 
-  FunctionType(Type *return_type, std::vector<Type *> arguments, bool vararg)
-      : return_type(return_type), arguments(arguments), vararg(vararg) {}
+  FunctionType(Type *return_type, std::vector<Type *> arguments,
+               FuncFlags flags)
+      : return_type(return_type), arguments(arguments), flags(flags) {}
   LLVMTypeRef llvm_type() {
     LLVMTypeRef *llvm_args = new LLVMTypeRef[arguments.size()];
     for (size_t i = 0; i < arguments.size(); i++)
       llvm_args[i] = arguments[i]->llvm_type();
     return LLVMFunctionType(return_type->llvm_type(), llvm_args,
-                            arguments.size(), vararg);
+                            arguments.size(), flags.is_vararg);
   }
   TypeType type_type() { return TypeType::Function; }
   bool eq(Type *other) {
@@ -307,7 +320,7 @@ public:
       return this->eq(ptr->get_points_to());
     FunctionType *other_f = dynamic_cast<FunctionType *>(other);
     if (!other_f || other_f->arguments.size() != arguments.size() ||
-        other_f->vararg != vararg || other_f->return_type->neq(return_type))
+        other_f->flags.neq(flags) || other_f->return_type->neq(return_type))
       return false;
     for (size_t i = 0; i < arguments.size(); i++)
       if (other_f->arguments[i]->neq(arguments[i]))

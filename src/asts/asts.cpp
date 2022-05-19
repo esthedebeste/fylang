@@ -98,13 +98,12 @@ class NumberExprAST : public ExprAST {
     long double floating;
     unsigned long long integer;
   } value;
-  unsigned int base;
 
 public:
   NumType type;
   NumberExprAST(std::string val, char type_char, bool has_dot,
                 unsigned int base)
-      : base(base), type(num_char_to_type(type_char, has_dot)) {
+      : type(num_char_to_type(type_char, has_dot)) {
     if (type.is_floating)
       if (base != 10)
         error("floating-point numbers with a base that isn't decimal aren't "
@@ -115,7 +114,10 @@ public:
       value.integer = std::stoull(val, nullptr, base);
   }
   NumberExprAST(unsigned long long val, char type_char)
-      : base(10), type(num_char_to_type(type_char, false)) {
+      : type(num_char_to_type(type_char, false)) {
+    value.integer = val;
+  }
+  NumberExprAST(unsigned long long val, NumType type) : type(type) {
     value.integer = val;
   }
   Type *get_type() { return &type; }
@@ -230,20 +232,18 @@ public:
     Type *type = get_type();
     LLVMValueRef ptr =
         LLVMAddGlobal(curr_module, type->llvm_type(), id.c_str());
+    Value *var_value = new BasicLoadValue(type, ptr);
+    LLVMSetInitializer(ptr, LLVMConstNull(type->llvm_type()));
     if (value) {
       if (value->is_constant()) {
         LLVMValueRef val = value->gen_value()->cast_to(type)->gen_val();
         LLVMSetInitializer(ptr, val);
         if (constant)
-          curr_scope->set_variable(id, new ConstValue(type, val));
-        else
-          curr_scope->set_variable(id, new BasicLoadValue(type, ptr));
-      } else {
-        LLVMSetInitializer(ptr, LLVMConstNull(type->llvm_type()));
+          var_value = new ConstValue(type, val);
+      } else
         add_store_before_main(ptr, new CastExprAST(value, type_ast(type)));
-        curr_scope->set_variable(id, new BasicLoadValue(type, ptr));
-      }
     }
+    curr_scope->set_variable(id, var_value);
     if (constant)
       LLVMSetGlobalConstant(ptr, true);
     return ptr;
@@ -278,62 +278,57 @@ public:
   }
 };
 
-static NumType *char_type;
 /// CharExprAST - Expression class for a single char ('a')
-class CharExprAST : public ExprAST {
-  char charr;
-
+class CharExprAST : public NumberExprAST {
 public:
-  CharExprAST(char charr) : charr(charr) {
-    if (!char_type)
-      char_type = new NumType(8, false, false);
-  }
-  Type *get_type() { return char_type; }
-  Value *gen_value() {
-    return new ConstValue(char_type,
-                          LLVMConstInt(char_type->llvm_type(), charr, false));
-  }
-  bool is_constant() { return true; }
+  CharExprAST(char data) : NumberExprAST(data, NumType(8, false, false)) {}
 };
 
 /// StringExprAST - Expression class for multiple chars ("hello")
-class StringExprAST : public ExprAST {
-  ArrayType *t_type;
+template <typename CharT> class StringExprAST : public ExprAST {
+  inline static NumType char_type{NumType(sizeof(CharT) * 8, false, false)};
+  ArrayType t_type;
+  std::basic_string<CharT> str;
 
 public:
-  std::string str;
-  StringExprAST(std::string str) : str(str) {
-    t_type = new ArrayType(char_type, str.size());
-  }
-  Type *get_type() { return t_type; }
+  StringExprAST(std::basic_string<CharT> str)
+      : str(str), t_type(&char_type, str.size()) {}
+  Type *get_type() { return &t_type; }
   Value *gen_value() {
-    return new ConstValue(t_type,
-                          LLVMConstString(str.c_str(), str.size(), true));
+    LLVMValueRef *vals = new LLVMValueRef[str.size()];
+    for (size_t i = 0; i < str.size(); i++)
+      vals[i] = LLVMConstInt(char_type.llvm_type(), str[i], false);
+    auto array = LLVMConstArray(char_type.llvm_type(), vals, str.size());
+    return new ConstValue(&t_type, array);
   }
   bool is_constant() { return true; }
 };
 
-static PointerType *c_str_type;
-class CStringExprAST : public ExprAST {
+template <typename CharT> class CStringExprAST : public ExprAST {
+  inline static NumType char_type{NumType(sizeof(CharT) * 8, false, false)};
+  ArrayType t_type;
+  PointerType p_type;
+  std::basic_string<CharT> str;
+
 public:
-  std::string str;
-  CStringExprAST(std::string str) : str(str) {
-    if (!char_type)
-      char_type = new NumType(8, false, false);
-    if (!c_str_type)
-      c_str_type = new PointerType(char_type);
-  }
-  Type *get_type() { return c_str_type; }
+  CStringExprAST(std::basic_string<CharT> str)
+      : str(str), t_type(&char_type, str.size() + 1), p_type(&this->t_type) {}
+  Type *get_type() { return &p_type; }
   Value *gen_value() {
-    LLVMValueRef value = LLVMConstString(str.c_str(), str.size(), false);
-    LLVMTypeRef type = LLVMArrayType(char_type->llvm_type(), str.size() + 1);
-    LLVMValueRef ptr = LLVMAddGlobal(curr_module, type, ".c_str");
-    LLVMSetInitializer(ptr, value);
+    auto len = str.size();
+    LLVMValueRef *vals = new LLVMValueRef[len + 1];
+    for (size_t i = 0; i < len; i++)
+      vals[i] = LLVMConstInt(char_type.llvm_type(), str[i], false);
+    vals[len] = LLVMConstNull(char_type.llvm_type());
+    auto array = LLVMConstArray(char_type.llvm_type(), vals, len + 1);
+    LLVMValueRef ptr = LLVMAddGlobal(curr_module, t_type.llvm_type(), ".c_str");
+    LLVMSetInitializer(ptr, array);
     LLVMSetGlobalConstant(ptr, true);
     LLVMValueRef cast =
-        LLVMBuildBitCast(curr_builder, ptr, c_str_type->llvm_type(), UN);
-    return new ConstValue(c_str_type, cast);
+        LLVMBuildBitCast(curr_builder, ptr, p_type.llvm_type(), UN);
+    return new ConstValue(&p_type, cast);
   }
+  bool is_constant() { return true; }
 };
 
 LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
@@ -602,8 +597,8 @@ public:
 
   Type *get_type() {
     FunctionType *func_t = get_func_type();
-    if (func_t->vararg ? args.size() < func_t->arguments.size()
-                       : args.size() != func_t->arguments.size())
+    if (func_t->flags.is_vararg ? args.size() < func_t->arguments.size()
+                                : args.size() != func_t->arguments.size())
       error("Incorrect # arguments passed. (Expected " +
             std::to_string(func_t->arguments.size()) + ", got " +
             std::to_string(args.size()) + ")");
@@ -624,9 +619,10 @@ public:
       else
         arg_vs[i] = args[i]->gen_value()->gen_val();
     }
-    return new ConstValue(func_t->return_type,
-                          LLVMBuildCall2(curr_builder, func_t->llvm_type(),
-                                         func, arg_vs, args.size(), UN));
+    auto call = LLVMBuildCall2(curr_builder, func_t->llvm_type(), func, arg_vs,
+                               args.size(), UN);
+    LLVMSetInstructionCallConv(call, func_t->flags.call_conv);
+    return new ConstValue(func_t->return_type, call);
   }
 };
 

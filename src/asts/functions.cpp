@@ -2,9 +2,6 @@
 #include "asts.cpp"
 #include "types.cpp"
 
-struct FuncFlags {
-  bool is_vararg = false, is_inline = false;
-};
 struct ReturnState {
   Type *return_type;
   LLVMBasicBlockRef return_block;
@@ -40,7 +37,7 @@ public:
               FuncFlags flags = {}, TypeAST *return_type = nullptr,
               ExprAST *body = nullptr)
       : name(name), args(args), flags(flags), body(body),
-        ft(return_type, seconds(args), flags.is_vararg) {}
+        ft(return_type, seconds(args), flags) {}
   std::unordered_map<FunctionType *, FuncValue *> already_declared;
   virtual std::string get_name(FunctionType *type) {
     if (!ft.is_generic())
@@ -67,6 +64,7 @@ public:
       return already_declared[type] = new FuncValue(type, func);
     LLVMValueRef func =
         LLVMAddFunction(curr_module, name.c_str(), type->llvm_type());
+    LLVMSetFunctionCallConv(func, flags.call_conv);
     already_declared[type] = new FuncValue(type, func);
     return new FuncValue(type, func);
   }
@@ -83,8 +81,8 @@ public:
     return type;
   }
   FunctionType *get_type(std::vector<ExprAST *> args) {
-    if (ft.vararg ? args.size() < this->args.size()
-                  : args.size() != this->args.size())
+    if (ft.flags.is_vararg ? args.size() < this->args.size()
+                           : args.size() != this->args.size())
       error("wrong number of arguments to function "
             << name << " (expected " << this->args.size() << ", got "
             << args.size() << ")");
@@ -128,8 +126,8 @@ public:
     return gen_call(arg_vals);
   }
   ConstValue *gen_call(std::vector<Value *> arg_vals) {
-    if (ft.vararg ? arg_vals.size() < this->args.size()
-                  : arg_vals.size() != this->args.size())
+    if (ft.flags.is_vararg ? arg_vals.size() < this->args.size()
+                           : arg_vals.size() != this->args.size())
       error("wrong number of arguments to function "
             << name << " (expected " << this->args.size() << ", got "
             << arg_vals.size() << ")");
@@ -160,7 +158,7 @@ public:
         error("can't infer return type of function " + name);
     }
     if (flags.is_inline) {
-      debug_log("inlining " << name);
+      debug_log("inlining function " << name);
       LLVMValueRef ret = gen_body(llvm_args, type);
       curr_scope = prev_scope;
       return new ConstValue(type->return_type, ret);
@@ -169,7 +167,9 @@ public:
     LLVMValueRef call =
         LLVMBuildCall2(curr_builder, type->llvm_type(), declaration->func,
                        llvm_args, arg_vals.size(), ("call_" + name).c_str());
+    LLVMSetInstructionCallConv(call, flags.call_conv);
     if (body && !LLVMGetFirstBasicBlock(declaration->func)) {
+      debug_log("generating body for function " << name);
       LLVMSetLinkage(declaration->func, LLVMInternalLinkage);
       size_t prev_unnamed = unnamed_acc;
       unnamed_acc = 0;

@@ -31,15 +31,16 @@ std::vector<ExprAST *> parse_call();
 static TypeAST *parse_type_unary();
 static TypeAST *parse_type_postfix();
 inline TypeAST *parse_type() { return parse_type_unary(); }
+static std::tuple<std::string, TypeAST *, FuncFlags>
+parse_prototype_begin(bool parse_name, bool parse_this);
 static TypeAST *parse_function_type() {
-  eat(T_FUNCTION);
+  auto flags = std::get<FuncFlags>(parse_prototype_begin(false, false));
   eat('(');
   std::vector<TypeAST *> arg_types;
-  bool vararg = false;
   while (curr_token != ')') {
     if (curr_token == T_VARARG) {
       eat(T_VARARG);
-      vararg = true;
+      flags.is_vararg = true;
       break;
     }
     auto type = parse_type();
@@ -56,7 +57,7 @@ static TypeAST *parse_function_type() {
   eat(')');
   eat(':');
   TypeAST *return_type = parse_type();
-  return new FunctionTypeAST(return_type, arg_types, vararg);
+  return new FunctionTypeAST(return_type, arg_types, flags);
 }
 
 static TypeAST *parse_num_type() {
@@ -248,10 +249,32 @@ static ExprAST *parse_char_expr() {
 static ExprAST *parse_string_expr() {
   auto type = string_type;
   std::string str = eat_string();
-  if (string_type == C_STRING)
-    return new CStringExprAST(string_value);
-  else
-    return new StringExprAST(string_value);
+  // macro converts `str` to a string with elements `type` (UTF8 => UTF16)
+#define retstr(type)                                                           \
+  {                                                                            \
+    std::basic_string<type> converted_str =                                    \
+        std::wstring_convert<                                                  \
+            deletable_facet<std::codecvt<type, char, std::mbstate_t>>, type>{} \
+            .from_bytes(str);                                                  \
+    if (string_type == C_STRING)                                               \
+      return new CStringExprAST<type>(converted_str);                          \
+    else                                                                       \
+      return new StringExprAST<type>(converted_str);                           \
+  }
+  if (curr_token == T_NUMBER) {
+    auto num = std::stoi(num_value, nullptr, num_base);
+    eat(T_NUMBER);
+    switch (num) {
+    case 8:
+      retstr(char);
+    case 16:
+      retstr(char16_t);
+    default:
+      error("Unknown string size: " << num);
+    }
+  } else
+    retstr(char);
+#undef retstr
 }
 /// parenexpr ::= '(' expression ')'
 static ExprAST *parse_paren_expr() {
@@ -664,34 +687,61 @@ static ExprAST *parse_expr() {
   ExprAST *LHS = parse_unary();
   return parse_bin_op_rhs(0, LHS);
 }
-/// prototype
-///   ::= fun id '(' id* ')'
-///   ::= fun '(' type ')' id '(' id* ')'
-static FunctionAST *parse_prototype(TypeAST *default_return_type = nullptr) {
-  bool is_inline = curr_token == T_INLINE;
-  if (is_inline)
+
+static std::tuple<std::string, TypeAST *, FuncFlags>
+parse_prototype_begin(bool parse_name, bool parse_this) {
+  FuncFlags flags;
+  flags.is_inline = curr_token == T_INLINE;
+  if (flags.is_inline)
     eat(T_INLINE);
   eat(T_FUNCTION);
   TypeAST *this_t = nullptr;
-  if (curr_token == '(') {
+  if (parse_this && curr_token == '(') {
     // type method
     eat('(');
     this_t = parse_type();
     eat(')');
   }
   std::string fn_name = identifier_string;
-  eat(T_IDENTIFIER);
+  if (parse_name)
+    eat(T_IDENTIFIER);
+  while (curr_token != '(') {
+    if (curr_token == T_IDENTIFIER) {
+      std::string type = identifier_string;
+      eat(T_IDENTIFIER);
+      eat('(');
+      std::string str;
+      if (curr_token == T_STRING)
+        str = string_value;
+      else if (curr_token == T_IDENTIFIER)
+        str = identifier_string;
+      else
+        str = token_to_str(curr_token);
+      if (!flags.set_by_string(type, str))
+        error("Unknown flag type: " << type);
+      get_next_token();
+      eat(')');
+    } else
+      error("expected flag or '(' after function name");
+  }
+  return {fn_name, this_t, flags};
+}
+
+/// prototype
+///   ::= fun id '(' id* ')'
+///   ::= fun '(' type ')' id '(' id* ')'
+static FunctionAST *parse_prototype(TypeAST *default_return_type = nullptr) {
+  auto [fn_name, this_t, flags] = parse_prototype_begin(true, true);
   eat('(');
 
   // Read the list of argument names.
   std::vector<std::pair<std::string, TypeAST *>> args;
-  bool vararg = false;
 
   if (curr_token != ')')
     while (1) {
       if (curr_token == T_VARARG) {
         eat(T_VARARG);
-        vararg = true;
+        flags.is_vararg = true;
         break;
       }
       std::string arg_name = identifier_string;
@@ -712,10 +762,9 @@ static FunctionAST *parse_prototype(TypeAST *default_return_type = nullptr) {
     return_type = default_return_type;
 
   if (this_t)
-    return new MethodAST(this_t, fn_name, args, {vararg, is_inline},
-                         return_type);
+    return new MethodAST(this_t, fn_name, args, flags, return_type);
   else
-    return new FunctionAST(fn_name, args, {vararg, is_inline}, return_type);
+    return new FunctionAST(fn_name, args, flags, return_type);
 }
 
 /// definition ::= 'fun' prototype expression
