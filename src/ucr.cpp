@@ -45,12 +45,13 @@ inline void loop_and_delete(LLVMModuleRef module,
   }
 }
 
-// unused code removal - removes all unused globals from a certain entry point
-// (often `fun main`)
-void remove_unused_globals(LLVMModuleRef module, LLVMValueRef entryPoint) {
+// unused code removal - removes all unused globals.
+void remove_unused_globals(LLVMModuleRef module,
+                           std::vector<LLVMValueRef> entryPoints) {
   used_globals.clear();
   removed_globals.clear();
-  mark_used_globals(entryPoint);
+  for (auto &entry : entryPoints)
+    mark_used_globals(entry);
   loop_and_delete(module, LLVMGetLastGlobal, LLVMGetPreviousGlobal,
                   LLVMDeleteGlobal);
 }

@@ -197,11 +197,21 @@ void add_stores_before_main(LLVMValueRef main_func) {
       LLVMAppendBasicBlock(main_func, "global_vars");
   LLVMMoveBasicBlockBefore(store_block, entry);
   LLVMPositionBuilderAtEnd(curr_builder, store_block);
-  for (auto &[ptr, val] : inits)
+  bool has_non_constant_init = false;
+  for (auto &[ptr, expr] : inits)
     // UCR can remove globals, so we need to check if the global still exists
-    if (removed_globals.count(ptr) == 0)
-      LLVMBuildStore(curr_builder, val->gen_value()->gen_val(), ptr);
+    if (removed_globals.count(ptr) == 0) {
+      LLVMValueRef val = expr->gen_value()->gen_val();
+      if (LLVMIsConstant(val))
+        LLVMSetInitializer(ptr, val);
+      else {
+        LLVMBuildStore(curr_builder, val, ptr);
+        has_non_constant_init = true;
+      }
+    }
   LLVMBuildBr(curr_builder, entry);
+  if (!has_non_constant_init)
+    LLVMDeleteBasicBlock(store_block);
 }
 
 /// LetExprAST - Expression class for creating a variable, like "let a = 3".
@@ -422,10 +432,7 @@ LLVMValueRef gen_ptr_num_binop(int op, LLVMValueRef ptr, LLVMValueRef num,
   switch (op) {
   case '-':
     // num = 0-num
-    num = LLVMBuildSub(
-        curr_builder,
-        LLVMConstInt((new NumType(32, false, false))->llvm_type(), 0, false),
-        num, UN);
+    num = LLVMBuildNeg(curr_builder, num, UN);
     /* falls through */
   case '+':
     return LLVMBuildGEP2(curr_builder, ptr_t->points_to->llvm_type(), ptr, &num,
@@ -514,6 +521,8 @@ public:
       return new ConstValue(type, gen_ptr_ptr_binop(op, L, R, lhs_pt, rhs_pt));
     error("Unknown op " + token_to_str(op));
   }
+  // LLVM can constantify binary expressions if both sides are also constant.
+  bool is_constant() { return LHS->is_constant() && RHS->is_constant(); }
 };
 /// UnaryExprAST - Expression class for a unary operator.
 class UnaryExprAST : public ExprAST {

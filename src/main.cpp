@@ -138,13 +138,16 @@ int main(int argc, char **argv, char **envp) {
       curr_named_functions.count("main")
           ? curr_named_functions["main"]->gen_ptr()->gen_val()
           : nullptr;
-  if (!getenv("NO_UCR") && main_function)
-    remove_unused_globals(curr_module, main_function);
+  std::vector<LLVMValueRef> entry_functions;
   if (main_function)
-    add_stores_before_main(main_function);
+    entry_functions.push_back(main_function);
   for (auto &[_, func] : curr_named_functions)
     if (func->flags.always_compile)
-      func->gen_ptr(); // add function to module
+      entry_functions.push_back(func->gen_ptr()->gen_val());
+  if (!getenv("NO_UCR") && main_function)
+    remove_unused_globals(curr_module, entry_functions);
+  if (main_function)
+    add_stores_before_main(main_function);
   if (mode == COMPILE) {
     std::string out = argv[3];
     size_t ext_pos = out.rfind('.');
