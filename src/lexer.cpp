@@ -51,6 +51,9 @@ static bool isnt_quot(char c) { return c != '"'; }
 // (!isspace(c))
 static bool isnt_space(char c) { return !isspace(c); }
 static bool is_alphaish(char c) { return isalpha(c) || isdigit(c) || c == '_'; }
+static inline auto xtoi(auto c) {
+  return c <= '9' ? c - '0' : c <= 'F' ? c - 'A' : c - 'a';
+}
 static char get_escape(char escape_char) {
   switch (escape_char) {
   case 'n':
@@ -67,6 +70,14 @@ static char get_escape(char escape_char) {
     return '\\';
   case '0':
     return '\0';
+  case 'x': {
+    // parse 2 hex digits
+    char first = next_char();
+    char second = next_char();
+    if (!isxdigit(first) || !isxdigit(second))
+      error("Expected two hex digits after \\x");
+    return (xtoi(first) << 4) + xtoi(second);
+  }
   default:
     error((std::string) "Invalid escape '" + escape_char + "'");
   }
