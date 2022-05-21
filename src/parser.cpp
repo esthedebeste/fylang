@@ -393,17 +393,28 @@ static ExprAST *parse_new_expr() {
   std::vector<std::pair<std::string, ExprAST *>> fields;
   eat('{');
   while (curr_token != '}') {
-    std::string key = identifier_string;
-    eat(T_IDENTIFIER);
-    eat('=');
-    auto value = parse_expr();
+    std::string key = "";
+    ExprAST *value;
+    if (curr_token == T_IDENTIFIER) {
+      key = identifier_string;
+      eat(T_IDENTIFIER);
+      if (curr_token == '=')
+        eat('=');
+      else {
+        // create X { a, b }
+        key = "";
+        value = new VariableExprAST(key);
+        goto postvalue;
+      }
+    }
+    value = parse_expr();
+  postvalue:
     fields.push_back(std::make_pair(key, value));
     if (curr_token == '}')
       break;
     eat(',');
   }
   eat('}');
-
   return new NewExprAST(type, fields, is_new);
 }
 

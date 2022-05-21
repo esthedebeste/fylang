@@ -899,10 +899,11 @@ public:
     LLVMValueRef agg = LLVMConstNull(st->llvm_type());
     for (size_t i = 0; i < fields.size(); i++) {
       auto &[key, value] = fields[i];
+      size_t index = key == "" ? i : st->get_index(key);
       agg = LLVMBuildInsertValue(
           curr_builder, agg,
-          value->gen_value()->cast_to(st->get_elem_type(i))->gen_val(),
-          st->get_index(key), key.c_str());
+          value->gen_value()->cast_to(st->get_elem_type(index))->gen_val(),
+          index, key.c_str());
     }
     if (is_new) {
       LLVMValueRef ptr = build_malloc(st)->gen_val();
@@ -911,6 +912,14 @@ public:
     } else {
       return new ConstValue(s_type->type(), agg);
     }
+  }
+  bool is_constant() {
+    if (is_new)
+      return false;
+    for (auto &[key, value] : fields)
+      if (!value->is_constant())
+        return false;
+    return true;
   }
 };
 
