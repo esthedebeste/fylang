@@ -22,6 +22,19 @@ public:
   LLVMValueRef gen_ptr() { error("Const values can't be pointered"); };
   bool has_ptr() { return false; }
 };
+/// ConstValueWithPtr - Constant value with a pointer to it's data.
+class ConstValueWithPtr : public Value {
+public:
+  LLVMValueRef val;
+  LLVMValueRef ptr;
+  Type *type;
+  ConstValueWithPtr(Type *type, LLVMValueRef ptr, LLVMValueRef val)
+      : type(type), ptr(ptr), val(val) {}
+  Type *get_type() { return type; };
+  LLVMValueRef gen_val() { return val; };
+  LLVMValueRef gen_ptr() { return ptr; };
+  bool has_ptr() { return true; }
+};
 /// IntValue - Integer value.
 class IntValue : public Value {
 public:

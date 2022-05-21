@@ -249,7 +249,7 @@ public:
         LLVMValueRef val = value->gen_value()->cast_to(type)->gen_val();
         LLVMSetInitializer(ptr, val);
         if (constant)
-          var_value = new ConstValue(type, val);
+          var_value = new ConstValueWithPtr(type, ptr, val);
       } else
         add_store_before_main(ptr, new CastExprAST(value, type_ast(type)));
     }
