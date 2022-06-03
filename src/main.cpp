@@ -144,7 +144,7 @@ int main(int argc, char **argv, char **envp) {
   for (auto &[_, func] : curr_named_functions)
     if (func->flags.always_compile)
       entry_functions.push_back(func->gen_ptr()->gen_val());
-  if (!getenv("NO_UCR") && main_function)
+  if (!getenv("NO_UCR") && entry_functions.size() > 0)
     remove_unused_globals(curr_module, entry_functions);
   if (main_function)
     add_stores_before_main(main_function);
