@@ -1,40 +1,32 @@
-#pragma once
-#include "utils.cpp"
-class CharReader {
-  char buf[4096];
-  char *p = buf;
-  size_t n = 0;
-  bool ended = false;
+#include "reader.h"
+#include "utils.h"
 
-public:
-  std::string file_path;
-  std::ifstream file;
-  CharReader(std::string file_path) : file_path(file_path), file(file_path) {}
-  ~CharReader() { file.close(); }
-  char next_char() {
-    if (ended) {
-      if (DEBUG)
-        fputs("[EOF]", stderr);
-      return EOF;
-    }
-    if (n == 0) {
-      file.read(buf, sizeof(buf));
-      n = file.gcount();
-      p = buf;
-    }
-    char ret = n-- > 0 ? *p++ : EOF;
-    if (ret == EOF) {
-      ended = true;
-      return ' ';
-    } else if (DEBUG)
-      fputc(ret, stderr);
-    return ret;
+CharReader::CharReader(std::string file_path)
+    : file_path(file_path), file(file_path) {}
+CharReader::~CharReader() { file.close(); }
+char CharReader::next_char() {
+  if (ended) {
+    if (DEBUG)
+      fputs("[EOF]", stderr);
+    return EOF;
   }
-};
+  if (n == 0) {
+    file.read(buf, sizeof(buf));
+    n = file.gcount();
+    p = buf;
+  }
+  char ret = n-- > 0 ? *p++ : EOF;
+  if (ret == EOF) {
+    ended = true;
+    return ' ';
+  } else if (DEBUG)
+    fputc(ret, stderr);
+  return ret;
+}
 
 std::vector<std::string> visited_paths;
 std::vector<CharReader *> queue;
-static int next_char() {
+int next_char() {
   char ret = EOF;
   while (ret == EOF && queue.size() > 0) {
     ret = queue.back()->next_char();
@@ -69,8 +61,7 @@ CharReader *get_file(std::string base_path, std::string relative_path) {
   error("File '" + relative_path + "' can't be resolved");
 }
 
-static void add_file_to_queue(std::string base_path,
-                              std::string relative_path) {
+void add_file_to_queue(std::string base_path, std::string relative_path) {
   CharReader *file = get_file(base_path, relative_path);
   std::string path = std::filesystem::canonical(file->file_path).string();
   for (auto &visited_path : visited_paths)

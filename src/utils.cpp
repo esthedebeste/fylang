@@ -1,14 +1,5 @@
-#pragma once
-#include "consts.cpp"
-
-template <typename A, typename B>
-std::vector<B> seconds(const std::vector<std::pair<A, B>> &array) {
-  size_t len = array.size();
-  std::vector<B> res(len);
-  for (size_t i = 0; i < len; ++i)
-    res[i] = array[i].second;
-  return res;
-}
+#include "utils.h"
+#include <cmath>
 
 size_t unnamed_acc = 0;
 // incrementing base52 (a-zA-Z) number for unnamed symbols
@@ -26,15 +17,6 @@ const char *next_unnamed() {
   buf[len] = '\0';
   return buf;
 }
-// Unnamed symbol
-#define UN next_unnamed()
-
-std::string token_to_str(int token);
-
-#define error(err) (std::cerr << "Error: " << err << std::endl), exit(1)
-#define debug_log(format)                                                      \
-  if (DEBUG)                                                                   \
-  std::cerr << "[" << __FILE__ << ":" << __LINE__ << "] " << format << std::endl
 
 LLVMCallConv get_call_conv(std::string name) {
   if (call_convs.count(name))
@@ -45,45 +27,29 @@ LLVMCallConv get_call_conv(std::string name) {
   else
     error("unknown call convention: " + name);
 }
-struct FuncFlags {
-  bool is_vararg = false, // is the function vararg
-      is_inline = false,  // should instructions be inlined into the call-site
-      always_compile = false; // should the function be compiled even if it
-                              // isn't referenced
-  LLVMCallConv call_conv = LLVMCCallConv; // calling convention
-  bool set_by_string(std::string str, std::string value) {
-    if (str == "call_conv" || str == "cc")
-      call_conv = get_call_conv(value);
-    else {
-      // boolean flags
-      bool enabled = value == "true";
-      if (str == "vararg")
-        is_vararg = enabled;
-      else if (str == "inline")
-        is_inline = enabled;
-      // might rename to "export" or "extern"? not sure.
-      else if (str == "always_compile")
-        always_compile = enabled;
-      else
-        return false;
-    }
-    return true;
+bool FuncFlags::set_by_string(std::string str, std::string value) {
+  if (str == "call_conv" || str == "cc")
+    call_conv = get_call_conv(value);
+  else {
+    // boolean flags
+    bool enabled = value == "true";
+    if (str == "vararg")
+      is_vararg = enabled;
+    else if (str == "inline")
+      is_inline = enabled;
+    // might rename to "export" or "extern"? not sure.
+    else if (str == "always_compile")
+      always_compile = enabled;
+    else
+      return false;
   }
-  bool eq(FuncFlags other) {
-    return is_vararg == other.is_vararg && is_inline == other.is_inline &&
-           always_compile == other.always_compile &&
-           call_conv == other.call_conv;
-  }
-  bool neq(FuncFlags other) { return !eq(other); }
-};
-
-// utility wrapper to adapt locale-bound facets for wstring/wbuffer convert
-template <class Facet> struct deletable_facet : Facet {
-  template <class... Args>
-  deletable_facet(Args &&...args) : Facet(std::forward<Args>(args)...) {}
-  ~deletable_facet() {}
-};
-
+  return true;
+}
+bool FuncFlags::eq(FuncFlags other) {
+  return is_vararg == other.is_vararg && is_inline == other.is_inline &&
+         always_compile == other.always_compile && call_conv == other.call_conv;
+}
+bool FuncFlags::neq(FuncFlags other) { return !eq(other); }
 #if defined(_WIN32)
 #include <Windows.h>
 #include <wchar.h>

@@ -1,78 +1,43 @@
-#pragma once
-#include "types.cpp"
-#include "utils.cpp"
-class CastValue;
-/// Variable - Base class for variable info.
-class Value {
-public:
-  virtual Type *get_type() = 0;
-  virtual LLVMValueRef gen_val() = 0;
-  virtual LLVMValueRef gen_ptr() = 0;
-  virtual bool has_ptr() { return true; }
-  CastValue *cast_to(Type *type);
+#include "values.h"
+
+ConstValue::ConstValue(Type *type, LLVMValueRef val) : type(type), val(val) {}
+Type *ConstValue::get_type() { return type; };
+LLVMValueRef ConstValue::gen_val() { return val; };
+LLVMValueRef ConstValue::gen_ptr() {
+  error("Const values can't be pointered");
 };
-/// ConstValue - Constant value with no pointer.
-class ConstValue : public Value {
-public:
-  LLVMValueRef val;
-  Type *type;
-  ConstValue(Type *type, LLVMValueRef val) : type(type), val(val) {}
-  Type *get_type() { return type; };
-  LLVMValueRef gen_val() { return val; };
-  LLVMValueRef gen_ptr() { error("Const values can't be pointered"); };
-  bool has_ptr() { return false; }
+bool ConstValue::has_ptr() { return false; }
+
+ConstValueWithPtr::ConstValueWithPtr(Type *type, LLVMValueRef ptr,
+                                     LLVMValueRef val)
+    : type(type), ptr(ptr), val(val) {}
+Type *ConstValueWithPtr::get_type() { return type; };
+LLVMValueRef ConstValueWithPtr::gen_val() { return val; };
+LLVMValueRef ConstValueWithPtr::gen_ptr() { return ptr; };
+bool ConstValueWithPtr::has_ptr() { return true; }
+
+IntValue::IntValue(NumType type, uint64_t val) : type(type), val(val) {}
+Type *IntValue::get_type() { return &type; };
+LLVMValueRef IntValue::gen_val() {
+  return LLVMConstInt(type.llvm_type(), val, type.is_signed);
 };
-/// ConstValueWithPtr - Constant value with a pointer to it's data.
-class ConstValueWithPtr : public Value {
-public:
-  LLVMValueRef val;
-  LLVMValueRef ptr;
-  Type *type;
-  ConstValueWithPtr(Type *type, LLVMValueRef ptr, LLVMValueRef val)
-      : type(type), ptr(ptr), val(val) {}
-  Type *get_type() { return type; };
-  LLVMValueRef gen_val() { return val; };
-  LLVMValueRef gen_ptr() { return ptr; };
-  bool has_ptr() { return true; }
+LLVMValueRef IntValue::gen_ptr() { error("Int values can't be pointered"); };
+bool IntValue::has_ptr() { return false; }
+
+FuncValue::FuncValue(Type *type, LLVMValueRef func) : type(type), func(func) {}
+Type *FuncValue::get_type() { return type; };
+LLVMValueRef FuncValue::gen_val() { return func; };
+LLVMValueRef FuncValue::gen_ptr() { return func; };
+bool FuncValue::has_ptr() { return true; }
+
+BasicLoadValue::BasicLoadValue(Type *type, LLVMValueRef variable)
+    : type(type), variable(variable) {}
+Type *BasicLoadValue::get_type() { return type; }
+LLVMValueRef BasicLoadValue::gen_val() {
+  return LLVMBuildLoad2(curr_builder, type->llvm_type(), variable, UN);
 };
-/// IntValue - Integer value.
-class IntValue : public Value {
-public:
-  uint64_t val;
-  NumType type;
-  IntValue(NumType type, uint64_t val) : type(type), val(val) {}
-  Type *get_type() { return &type; };
-  LLVMValueRef gen_val() {
-    return LLVMConstInt(type.llvm_type(), val, type.is_signed);
-  };
-  LLVMValueRef gen_ptr() { error("Int values can't be pointered"); };
-  bool has_ptr() { return false; }
-};
-/// FuncValue - For functions
-class FuncValue : public Value {
-public:
-  LLVMValueRef func;
-  Type *type;
-  FuncValue(Type *type, LLVMValueRef func) : type(type), func(func) {}
-  Type *get_type() { return type; };
-  LLVMValueRef gen_val() { return func; };
-  LLVMValueRef gen_ptr() { return func; };
-  bool has_ptr() { return true; }
-};
-/// BasicLoadValue - generates a load op.
-class BasicLoadValue : public Value {
-public:
-  LLVMValueRef variable;
-  Type *type;
-  BasicLoadValue(Type *type, LLVMValueRef variable)
-      : type(type), variable(variable) {}
-  Type *get_type() { return type; }
-  LLVMValueRef gen_val() {
-    return LLVMBuildLoad2(curr_builder, type->llvm_type(), variable, UN);
-  };
-  LLVMValueRef gen_ptr() { return variable; };
-  bool has_ptr() { return true; }
-};
+LLVMValueRef BasicLoadValue::gen_ptr() { return variable; };
+bool BasicLoadValue::has_ptr() { return true; }
 
 ConstValue *gen_phi(LLVMBasicBlockRef a_bb, Value *a_v, LLVMBasicBlockRef b_bb,
                     Value *b_v) {
@@ -196,33 +161,24 @@ LLVMValueRef cast(Value *source, Type *to) {
   error("Invalid cast from " + src->stringify() + " to " + to->stringify());
 }
 
-class CastValue : public Value {
-public:
-  Value *source;
-  Type *to;
-  CastValue(Value *source, Type *to) : source(source), to(to) {}
-  Type *get_type() { return to; }
-  LLVMValueRef gen_val() { return cast(source, to); }
-  LLVMValueRef gen_ptr() { error("Can't get the pointer to a cast"); }
-  bool has_ptr() { return false; }
-};
+CastValue::CastValue(Value *source, Type *to) : source(source), to(to) {}
+Type *CastValue::get_type() { return to; }
+LLVMValueRef CastValue::gen_val() { return cast(source, to); }
+LLVMValueRef CastValue::gen_ptr() { error("Can't get the pointer to a cast"); }
+bool CastValue::has_ptr() { return false; }
+
 CastValue *Value::cast_to(Type *to) { return new CastValue(this, to); }
 
-class NamedValue : public Value {
-public:
-  Value *val;
-  std::string name;
-  NamedValue(Value *val, std::string name) : val(val), name(name) {}
-  Type *get_type() { return val->get_type(); }
-  LLVMValueRef gen_val() {
-    LLVMValueRef value = val->gen_val();
-    LLVMSetValueName2(value, name.c_str(), name.size());
-    return value;
-  }
-  LLVMValueRef gen_ptr() {
-    LLVMValueRef value = val->gen_ptr();
-    LLVMSetValueName2(value, name.c_str(), name.size());
-    return value;
-  }
-  bool has_ptr() { return val->has_ptr(); }
-};
+NamedValue::NamedValue(Value *val, std::string name) : val(val), name(name) {}
+Type *NamedValue::get_type() { return val->get_type(); }
+LLVMValueRef NamedValue::gen_val() {
+  LLVMValueRef value = val->gen_val();
+  LLVMSetValueName2(value, name.c_str(), name.size());
+  return value;
+}
+LLVMValueRef NamedValue::gen_ptr() {
+  LLVMValueRef value = val->gen_ptr();
+  LLVMSetValueName2(value, name.c_str(), name.size());
+  return value;
+}
+bool NamedValue::has_ptr() { return val->has_ptr(); }

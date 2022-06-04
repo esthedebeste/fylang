@@ -1,86 +1,13 @@
-#pragma once
-#include <codecvt>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <limits.h>
-#include <locale>
-#include <math.h>
-#include <sstream>
-#include <stdlib.h>
-#include <string.h>
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
-extern "C" {
-#include "llvm-c-14/llvm-c/BitWriter.h"
-#include "llvm-c-14/llvm-c/Core.h"
-#include "llvm-c-14/llvm-c/ExecutionEngine.h"
-#include "llvm-c-14/llvm-c/TargetMachine.h"
-}
+#include "consts.h"
 bool DEBUG = false;
 std::string std_dir;
 std::string os_name;
-typedef unsigned int uint;
-enum Token : const int {
-  T_EOF = -0xffff, // end of file
-  T_IDENTIFIER,    // foo
-  T_NUMBER,        // 123
-  T_STRING,        // "foo"
-  T_CHAR,          // 'a'
-  T_BOOL,          // true
-  T_IF,            // if
-  T_ELSE,          // else
-  T_WHILE,         // while
-  T_RETURN,        // return
-  T_FUNCTION,      // fun
-  T_DECLARE,       // declare
-  T_LET,           // let
-  T_CONST,         // const
-  T_STRUCT,        // struct
-  T_NEW,           // new
-  T_CREATE,        // create
-  T_EQEQ,          // ==
-  T_LEQ,           // <=
-  T_GEQ,           // >=
-  T_NEQ,           // !=
-  T_LOR,           // ||
-  T_LAND,          // &&
-  T_LSHIFT,        // <<
-  T_RSHIFT,        // >>
-  T_INCLUDE,       // include
-  T_TYPE,          // type
-  T_UNSIGNED,      // unsigned
-  T_SIGNED,        // signed
-  T_AS,            // as
-  T_VARARG,        // __VARARG__
-  T_TYPEOF,        // typeof
-  T_SIZEOF,        // sizeof
-  T_TRUE,          // true
-  T_FALSE,         // false
-  T_NULL,          // null
-  T_FOR,           // for
-  T_PLUSEQ,        // +=
-  T_MINEQ,         // -=
-  T_STAREQ,        // *=
-  T_SLASHEQ,       // /=
-  T_PERCENTEQ,     // %=
-  T_ANDEQ,         // &=
-  T_OREQ,          // |=
-  T_DUMP,          // DUMP
-  T_ASSERT_TYPE,   // ASSERT_TYPE
-  T_GENERIC,       // generic
-  T_INLINE,        // inline
-  T_ASM,           // __asm__
-  T_OR,            // or
-};
+LLVMContextRef curr_ctx;
+LLVMBuilderRef curr_builder;
+LLVMModuleRef curr_module;
+LLVMTargetDataRef target_data;
 
-static LLVMContextRef curr_ctx;
-static LLVMBuilderRef curr_builder;
-static LLVMModuleRef curr_module;
-static LLVMTargetDataRef target_data;
-static std::unordered_map<int, int> binop_precedence = {
+std::unordered_map<int, int> binop_precedence = {
 #define assign_prec 1
     {'=', 1},       {T_PLUSEQ, 1},    {T_MINEQ, 1},   {T_STAREQ, 1},
     {T_SLASHEQ, 1}, {T_PERCENTEQ, 1}, {T_ANDEQ, 1},   {T_OREQ, 1},
@@ -98,11 +25,11 @@ static std::unordered_map<int, int> binop_precedence = {
 };
 
 // += to +, -= to -, etc.
-static std::unordered_map<int, int> op_eq_ops = {
+std::unordered_map<int, int> op_eq_ops = {
     {T_PLUSEQ, '+'},    {T_MINEQ, '-'}, {T_STAREQ, '*'}, {T_SLASHEQ, '/'},
     {T_PERCENTEQ, '%'}, {T_ANDEQ, '&'}, {T_OREQ, '|'},
 };
-static std::unordered_map<Token, std::string> token_strs = {
+std::unordered_map<Token, std::string> token_strs = {
     {T_EOF, "EOF"},
     {T_IDENTIFIER, "identifier"},
     {T_NUMBER, "number"},
@@ -154,7 +81,8 @@ static std::unordered_map<Token, std::string> token_strs = {
     {T_ASM, "__asm__"},
     {T_OR, "or"},
 };
-static std::unordered_map<std::string, Token> keywords = {
+
+std::unordered_map<std::string, Token> keywords = {
     {"if", T_IF},
     {"else", T_ELSE},
     {"while", T_WHILE},
@@ -186,9 +114,9 @@ static std::unordered_map<std::string, Token> keywords = {
     {"or", T_OR},
 };
 
-static std::unordered_set<int> unaries = {'!', '*', '&', '+', '-', T_RETURN};
-static std::unordered_set<int> type_unaries = {'*', '&', T_UNSIGNED, T_SIGNED};
+std::unordered_set<int> unaries = {'!', '*', '&', '+', '-', T_RETURN};
+std::unordered_set<int> type_unaries = {'*', '&', T_UNSIGNED, T_SIGNED};
 
 // clang-format off
-static std::unordered_map<std::string, LLVMCallConv> call_convs = {{"C", LLVMCCallConv}, {"Fast", LLVMFastCallConv}, {"Cold", LLVMColdCallConv}, {"GHC", LLVMGHCCallConv}, {"HiPE", LLVMHiPECallConv}, {"WebKitJS", LLVMWebKitJSCallConv}, {"AnyReg", LLVMAnyRegCallConv}, {"PreserveMost", LLVMPreserveMostCallConv}, {"PreserveAll", LLVMPreserveAllCallConv}, {"Swift", LLVMSwiftCallConv}, {"CXXFASTTLS", LLVMCXXFASTTLSCallConv}, {"X86Stdcall", LLVMX86StdcallCallConv}, {"X86Fastcall", LLVMX86FastcallCallConv}, {"ARMAPCS", LLVMARMAPCSCallConv}, {"ARMAAPCS", LLVMARMAAPCSCallConv}, {"ARMAAPCSVFP", LLVMARMAAPCSVFPCallConv}, {"MSP430INTR", LLVMMSP430INTRCallConv}, {"X86ThisCall", LLVMX86ThisCallCallConv}, {"PTXKernel", LLVMPTXKernelCallConv}, {"PTXDevice", LLVMPTXDeviceCallConv}, {"SPIRFUNC", LLVMSPIRFUNCCallConv}, {"SPIRKERNEL", LLVMSPIRKERNELCallConv}, {"IntelOCLBI", LLVMIntelOCLBICallConv}, {"X8664SysV", LLVMX8664SysVCallConv}, {"Win64", LLVMWin64CallConv}, {"X86VectorCall", LLVMX86VectorCallCallConv}, {"HHVM", LLVMHHVMCallConv}, {"HHVMC", LLVMHHVMCCallConv}, {"X86INTR", LLVMX86INTRCallConv}, {"AVRINTR", LLVMAVRINTRCallConv}, {"AVRSIGNAL", LLVMAVRSIGNALCallConv}, {"AVRBUILTIN", LLVMAVRBUILTINCallConv}, {"AMDGPUVS", LLVMAMDGPUVSCallConv}, {"AMDGPUGS", LLVMAMDGPUGSCallConv}, {"AMDGPUPS", LLVMAMDGPUPSCallConv}, {"AMDGPUCS", LLVMAMDGPUCSCallConv}, {"AMDGPUKERNEL", LLVMAMDGPUKERNELCallConv}, {"X86RegCall", LLVMX86RegCallCallConv}, {"AMDGPUHS", LLVMAMDGPUHSCallConv}, {"MSP430BUILTIN", LLVMMSP430BUILTINCallConv}, {"AMDGPULS", LLVMAMDGPULSCallConv}, {"AMDGPUES", LLVMAMDGPUESCallConv}};
+std::unordered_map<std::string, LLVMCallConv> call_convs = {{"C", LLVMCCallConv}, {"Fast", LLVMFastCallConv}, {"Cold", LLVMColdCallConv}, {"GHC", LLVMGHCCallConv}, {"HiPE", LLVMHiPECallConv}, {"WebKitJS", LLVMWebKitJSCallConv}, {"AnyReg", LLVMAnyRegCallConv}, {"PreserveMost", LLVMPreserveMostCallConv}, {"PreserveAll", LLVMPreserveAllCallConv}, {"Swift", LLVMSwiftCallConv}, {"CXXFASTTLS", LLVMCXXFASTTLSCallConv}, {"X86Stdcall", LLVMX86StdcallCallConv}, {"X86Fastcall", LLVMX86FastcallCallConv}, {"ARMAPCS", LLVMARMAPCSCallConv}, {"ARMAAPCS", LLVMARMAAPCSCallConv}, {"ARMAAPCSVFP", LLVMARMAAPCSVFPCallConv}, {"MSP430INTR", LLVMMSP430INTRCallConv}, {"X86ThisCall", LLVMX86ThisCallCallConv}, {"PTXKernel", LLVMPTXKernelCallConv}, {"PTXDevice", LLVMPTXDeviceCallConv}, {"SPIRFUNC", LLVMSPIRFUNCCallConv}, {"SPIRKERNEL", LLVMSPIRKERNELCallConv}, {"IntelOCLBI", LLVMIntelOCLBICallConv}, {"X8664SysV", LLVMX8664SysVCallConv}, {"Win64", LLVMWin64CallConv}, {"X86VectorCall", LLVMX86VectorCallCallConv}, {"HHVM", LLVMHHVMCallConv}, {"HHVMC", LLVMHHVMCCallConv}, {"X86INTR", LLVMX86INTRCallConv}, {"AVRINTR", LLVMAVRINTRCallConv}, {"AVRSIGNAL", LLVMAVRSIGNALCallConv}, {"AVRBUILTIN", LLVMAVRBUILTINCallConv}, {"AMDGPUVS", LLVMAMDGPUVSCallConv}, {"AMDGPUGS", LLVMAMDGPUGSCallConv}, {"AMDGPUPS", LLVMAMDGPUPSCallConv}, {"AMDGPUCS", LLVMAMDGPUCSCallConv}, {"AMDGPUKERNEL", LLVMAMDGPUKERNELCallConv}, {"X86RegCall", LLVMX86RegCallCallConv}, {"AMDGPUHS", LLVMAMDGPUHSCallConv}, {"MSP430BUILTIN", LLVMMSP430BUILTINCallConv}, {"AMDGPULS", LLVMAMDGPULSCallConv}, {"AMDGPUES", LLVMAMDGPUESCallConv}};
 // clang-format on

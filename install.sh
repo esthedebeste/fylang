@@ -1,5 +1,5 @@
 set -e
-cmake -B ./build . -DCMAKE_BUILD_TYPE=Release
+cmake -B ./build . -DCMAKE_BUILD_TYPE=Release -G "Ninja Multi-Config"
 cmake --build ./build --config Release
 mkdir ~/.fy/bin -p
 sudo cp ./build/fy ~/.fy/bin/

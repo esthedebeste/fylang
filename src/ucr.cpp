@@ -1,4 +1,5 @@
-#include "utils.cpp"
+#include "utils.h"
+
 std::vector<LLVMValueRef> used_globals;
 bool is_global_used(LLVMValueRef global) {
   for (auto &used_global : used_globals)

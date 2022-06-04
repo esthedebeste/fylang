@@ -1,21 +1,15 @@
-#pragma once
-#include "reader.cpp"
-#include "utils.cpp"
+#include "lexer.h"
 
-static std::string
-    identifier_string;  // [a-zA-Z][a-zA-Z0-9]* - Filled in if T_IDENTIFIER
-static char char_value; // '[^']' - Filled in if T_CHAR
-static std::string num_value; // Filled in if T_NUMBER
-static uint num_base;         // Filled in if T_NUMBER
-static bool
-    num_has_dot;      // Whether num_value contains '.' - Filled in if T_NUMBER
-static char num_type; // Type of number. 'd' => double, 'f' => float, 'i' =>
-                      // int32, 'u' => uint32, 'b' => byte/char/uint8
-static std::string string_value; // "[^"]*" - Filled in if T_STRING
-static enum {
-  C_STRING,
-  CHAR_ARRAY
-} string_type; // Type of string. 'c' => C-string, otherwise char[len]
+std::string
+    identifier_string; // [a-zA-Z][a-zA-Z0-9]* - Filled in if T_IDENTIFIER
+char char_value;       // '[^']' - Filled in if T_CHAR
+std::string num_value; // Filled in if T_NUMBER
+uint num_base;         // Filled in if T_NUMBER
+bool num_has_dot;      // Whether num_value contains '.' - Filled in if T_NUMBER
+char num_type;         // Type of number. 'd' => double, 'f' => float, 'i' =>
+                       // int32, 'u' => uint32, 'b' => byte/char/uint8
+std::string string_value; // "[^"]*" - Filled in if T_STRING
+StringType string_type; // Type of string. 'c' => C-string, otherwise char[len]
 
 std::string token_to_str(const int token) {
   switch (token) {
@@ -28,8 +22,8 @@ std::string token_to_str(const int token) {
       return std::string(1, token);
   }
 }
-static char last_char = ' ';
-static std::string read_str(bool (*predicate)(char)) {
+char last_char = ' ';
+std::string read_str(bool (*predicate)(char)) {
   std::stringstream stream;
   stream << last_char;
   while (predicate(last_char = next_char()))
@@ -37,7 +31,7 @@ static std::string read_str(bool (*predicate)(char)) {
   return stream.str();
 }
 // isdigit(c) || c=='.'
-static bool is_numish(char c) {
+bool is_numish(char c) {
   if (c == '.') {
     if (num_has_dot)
       return false;
@@ -47,14 +41,14 @@ static bool is_numish(char c) {
   return isdigit(c);
 }
 // c != '"'
-static bool isnt_quot(char c) { return c != '"'; }
+bool isnt_quot(char c) { return c != '"'; }
 // (!isspace(c))
-static bool isnt_space(char c) { return !isspace(c); }
-static bool is_alphaish(char c) { return isalpha(c) || isdigit(c) || c == '_'; }
-static inline auto xtoi(auto c) {
+bool isnt_space(char c) { return !isspace(c); }
+bool is_alphaish(char c) { return isalpha(c) || isdigit(c) || c == '_'; }
+inline auto xtoi(auto c) {
   return c <= '9' ? c - '0' : c <= 'F' ? c - 'A' : c - 'a';
 }
-static char get_escape(char escape_char) {
+char get_escape(char escape_char) {
   switch (escape_char) {
   case 'n':
     return '\n';
@@ -84,7 +78,7 @@ static char get_escape(char escape_char) {
 }
 
 // Returns a token, or a number of the token's ASCII value.
-static int next_token() {
+int next_token() {
   while (isspace(last_char))
     last_char = next_char();
   if (last_char == EOF)

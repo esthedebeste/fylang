@@ -1,37 +1,39 @@
-#include "parser.cpp"
-#include "ucr.cpp"
-#include "utils.cpp"
-static void handle_definition() {
+#include "parser.h"
+#include "ucr.h"
+#include "utils.h"
+#include <cstring>
+
+void handle_definition() {
   auto ast = parse_definition();
   debug_log("Parsed a function definition (name: " << ast->name << ")");
   ast->add();
 }
 
-static void handle_declare() {
+void handle_declare() {
   auto ast = parse_declare();
   debug_log("Parsed a declare\n");
   auto val = ast->gen_toplevel();
   if (DEBUG && val)
     LLVMDumpValue(val);
 }
-static void handle_global_let() {
+void handle_global_let() {
   auto ast = parse_let_expr();
   debug_log("Parsed a global variable\n");
   auto val = ast->gen_toplevel();
   if (DEBUG)
     LLVMDumpValue(val);
 }
-static void handle_global_struct() {
+void handle_global_struct() {
   auto ast = parse_struct();
   debug_log("Parsed a struct definition\n");
   ast->gen_toplevel();
 }
-static void handle_global_type() {
+void handle_global_type() {
   auto ast = parse_type_definition();
   debug_log("Parsed a type definition\n");
   ast->gen_toplevel();
 }
-static void handle_global_include() {
+void handle_global_include() {
   std::string file_name = parse_include();
   debug_log("Parsed an include (" << file_name << ")");
   size_t os_loc = file_name.find("{os}");
@@ -44,7 +46,7 @@ static void handle_global_include() {
   eat(T_STRING);
 }
 
-static void main_loop() {
+void main_loop() {
   get_next_token();
   while (1) {
     switch (curr_token) {
@@ -180,7 +182,6 @@ int main(int argc, char **argv, char **envp) {
     if (!main_function)
       error("No main function found, cannot run");
     LLVMInitializeNativeAsmPrinter();
-    LLVMInitializeNativeAsmParser();
     LLVMLinkInMCJIT();
     LLVMExecutionEngineRef engine;
     char *err;
