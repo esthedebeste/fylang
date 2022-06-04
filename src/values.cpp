@@ -149,6 +149,35 @@ LLVMValueRef gen_arr_cast(Value *value, ArrayType *a, Type *b) {
   error(a->stringify() + " can't be casted to " + b->stringify());
 }
 
+LLVMValueRef gen_tuple_cast(Value *value, TupleType *a, Type *b) {
+  if (ArrayType *arr = dynamic_cast<ArrayType *>(b)) {
+    auto elem_type = arr->elem;
+    for (Type *member : a->types)
+      if (member->neq(elem_type))
+        error("Tuple can't be casted to array with different type, " +
+              a->stringify() + " can't be casted to " + arr->stringify() + ".");
+    if (arr->count != a->types.size())
+      error("Tuple can't be casted to array with different size, " +
+            a->stringify() + " can't be casted to " + arr->stringify() + ".");
+    if (value->has_ptr()) {
+      // load (A, A, A) as [A x 3]
+      return LLVMBuildLoad2(curr_builder, arr->llvm_type(),
+                            LLVMBuildBitCast(curr_builder, value->gen_ptr(),
+                                             arr->llvm_type(), UN),
+                            UN);
+    } else {
+      LLVMValueRef arr_v = LLVMGetUndef(arr->llvm_type());
+      auto tup_v = value->gen_val();
+      for (size_t i = 0; i < a->types.size(); i++)
+        arr_v = LLVMBuildInsertValue(
+            curr_builder, arr_v,
+            LLVMBuildExtractValue(curr_builder, tup_v, i, UN), i, UN);
+      return arr_v;
+    }
+  }
+  error(a->stringify() + " can't be casted to " + b->stringify());
+}
+
 LLVMValueRef cast(Value *source, Type *to) {
   Type *src = source->get_type();
   if (src->eq(to))
@@ -158,8 +187,10 @@ LLVMValueRef cast(Value *source, Type *to) {
     return gen_num_cast(source->gen_val(), num, to);
   if (PointerType *ptr = dynamic_cast<PointerType *>(src))
     return gen_ptr_cast(source->gen_val(), ptr, to);
-  if (ArrayType *tup = dynamic_cast<ArrayType *>(src))
-    return gen_arr_cast(source, tup, to);
+  if (ArrayType *arr = dynamic_cast<ArrayType *>(src))
+    return gen_arr_cast(source, arr, to);
+  if (TupleType *tup = dynamic_cast<TupleType *>(src))
+    return gen_tuple_cast(source, tup, to);
   if (src->type_type() == TypeType::Null)
     return LLVMConstNull(to->llvm_type());
   error("Invalid cast from " + src->stringify() + " to " + to->stringify());

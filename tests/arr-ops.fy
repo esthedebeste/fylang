@@ -1,11 +1,9 @@
 include "std/io"
 
 // todo: add a better way to initialize arrays
-fun arr(a: generic E, b: E, c: E): E[3] {
-	let x = (a, b, c)
-	// bitcast tuple to array
-	return *((&x) as *E[3])
-}
+fun arr(a: generic E, b: E, c: E): E[3]
+	(a, b, c)
+
 fun p0(str: generic S) {
 	print(str)
 	0
