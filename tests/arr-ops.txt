@@ -1,0 +1,2 @@
+Array comparison works
+Array adding works

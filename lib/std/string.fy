@@ -94,11 +94,11 @@ fun __streq(a: *char, b: *char, len: uint_ptrsize): bool {
 	true
 }
 
-inline fun(String | char[generic Alen]) equals(other: String | char[generic Blen]): bool {
-	const alen = if(typeof(this) == String) this.length else Alen
-	const blen = if(typeof(other) == String) other.length else Blen
+inline fun(String) equals(other: String): bool {
+	const alen = this.length
+	const blen = other.length
 	if(alen != blen) false
-	else __streq(this, other, alen)
+	else __streq(this.chars, other.chars, alen)
 }
 
 inline fun(String) print_to(s: *FILE) fwrite(this.chars, 1, this.length, s)

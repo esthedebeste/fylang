@@ -340,7 +340,9 @@ public:
   }
   bool is_constant() { return true; }
 };
-
+Type *get_binop_type(int op, Type *lhs_t, Type *rhs_t);
+Value *gen_binop(int op, LLVMValueRef lhs, LLVMValueRef rhs, Type *lhs_t,
+                 Type *rhs_t);
 LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
                                NumType *lhs_nt, NumType *rhs_nt) {
   if (lhs_nt->neq(rhs_nt))
@@ -377,8 +379,7 @@ LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
     case T_NEQ:
       return LLVMBuildFCmp(curr_builder, LLVMRealUNE, L, R, UN);
     default:
-      error("Error: invalid float_float binary operator '" + token_to_str(op) +
-            "'");
+      error("invalid float_float binary operator '" + token_to_str(op) + "'");
     }
   else if (!lhs_nt->is_floating && !rhs_nt->is_floating) {
     bool is_signed = lhs_nt->is_signed && rhs_nt->is_signed;
@@ -457,6 +458,82 @@ LLVMValueRef gen_ptr_ptr_binop(int op, LLVMValueRef L, LLVMValueRef R,
   }
 }
 
+LLVMValueRef gen_arr_arr_binop(int op, LLVMValueRef L, LLVMValueRef R,
+                               ArrayType *lhs_at, ArrayType *rhs_at) {
+  if (lhs_at->neq(rhs_at))
+    error("Array-array comparison with different types: " +
+          lhs_at->stringify() + " doesn't match " + rhs_at->stringify());
+  auto arr_size = lhs_at->count;
+  if (arr_size == 0)
+    error("Array-array comparison with empty arrays");
+  auto arr_type = lhs_at->llvm_type();
+  auto res_type = get_binop_type(op, lhs_at->elem, rhs_at->elem);
+  LLVMValueRef res;
+  for (size_t i = 0; i < arr_size; i++) {
+    auto lhs_elem = LLVMBuildExtractValue(curr_builder, L, i, UN);
+    auto rhs_elem = LLVMBuildExtractValue(curr_builder, R, i, UN);
+    auto elem_res =
+        gen_binop(op, lhs_elem, rhs_elem, lhs_at->elem, rhs_at->elem);
+    auto elem_val = elem_res->gen_val();
+    if (op == T_EQEQ) {
+      // a[0] == b[0] && a[1] == b[1] && ...
+      if (!res)
+        res = elem_val;
+      else
+        res = LLVMBuildAnd(curr_builder, res, elem_val, UN);
+    } else {
+      // ( a[0] + b[0], a[1] + b[1], ... )
+      if (!res)
+        res = LLVMGetUndef(arr_type);
+      res = LLVMBuildInsertValue(curr_builder, res, elem_val, i, UN);
+    }
+  }
+  return res;
+}
+
+Type *get_binop_type(int op, Type *lhs_t, Type *rhs_t) {
+  TypeType lhs_tt = lhs_t->type_type();
+  TypeType rhs_tt = rhs_t->type_type();
+
+  if (binop_precedence[op] == comparison_prec)
+    return BoolExprAST(true).get_type();
+  else if (lhs_tt == Number && rhs_tt == Number)
+    return lhs_t; // int + int returns int
+  else if (lhs_tt == Pointer && rhs_tt == Number)
+    // ptr + int returns offsetted ptr
+    return /* ptr */ lhs_t;
+  else if (lhs_tt == Number && rhs_tt == Pointer)
+    // int + ptr returns offsetted ptr
+    return /* ptr */ rhs_t;
+  else if (lhs_tt == Array && rhs_tt == Array)
+    return lhs_t; // array + array returns array
+  error("Unknown op " + token_to_str(op) + " for types " + lhs_t->stringify() +
+        " and " + rhs_t->stringify());
+}
+
+Value *gen_binop(int op, LLVMValueRef L, LLVMValueRef R, Type *lhs_t,
+                 Type *rhs_t) {
+  Type *type = get_binop_type(op, lhs_t, rhs_t);
+  auto lhs_nt = dynamic_cast<NumType *>(lhs_t);
+  auto rhs_nt = dynamic_cast<NumType *>(rhs_t);
+  auto lhs_pt = dynamic_cast<PointerType *>(lhs_t);
+  auto rhs_pt = dynamic_cast<PointerType *>(rhs_t);
+  auto lhs_at = dynamic_cast<ArrayType *>(lhs_t);
+  auto rhs_at = dynamic_cast<ArrayType *>(rhs_t);
+  if (lhs_nt && rhs_nt)
+    return new ConstValue(type, gen_num_num_binop(op, L, R, lhs_nt, rhs_nt));
+  else if (lhs_nt && rhs_pt)
+    return new ConstValue(type, gen_ptr_num_binop(op, R, L, rhs_pt, lhs_nt));
+  else if (lhs_pt && rhs_nt)
+    return new ConstValue(type, gen_ptr_num_binop(op, L, R, lhs_pt, rhs_nt));
+  else if (lhs_pt && rhs_pt)
+    return new ConstValue(type, gen_ptr_ptr_binop(op, L, R, lhs_pt, rhs_pt));
+  else if (lhs_at && rhs_at)
+    return new ConstValue(type, gen_arr_arr_binop(op, L, R, lhs_at, rhs_at));
+  error("Unknown op " + token_to_str(op) + " for types " + lhs_t->stringify() +
+        " and " + rhs_t->stringify());
+}
+
 class AssignExprAST : public ExprAST {
   ExprAST *LHS, *RHS;
 
@@ -480,44 +557,13 @@ public:
       : op(op), LHS(LHS), RHS(RHS) {}
 
   Type *get_type() {
-    Type *lhs_t = LHS->get_type();
-    Type *rhs_t = RHS->get_type();
-    TypeType lhs_tt = lhs_t->type_type();
-    TypeType rhs_tt = rhs_t->type_type();
-
-    if (binop_precedence[op] == comparison_prec)
-      return BoolExprAST(true).get_type();
-    else if (lhs_tt == TypeType::Number && rhs_tt == TypeType::Number)
-      return lhs_t; // int + int returns int
-    else if (lhs_tt == TypeType::Pointer &&
-             rhs_tt == TypeType::Number) // ptr + int returns offsetted ptr
-      return /* ptr */ lhs_t;
-    else if (lhs_tt == TypeType::Number &&
-             rhs_tt == TypeType::Pointer) // int + ptr returns offsetted ptr
-      return /* ptr */ rhs_t;
-    else
-      error("Unknown op " + token_to_str(op));
+    return get_binop_type(op, LHS->get_type(), RHS->get_type());
   }
 
   Value *gen_value() {
-    Type *type = get_type();
-    Type *lhs_t = LHS->get_type();
-    Type *rhs_t = RHS->get_type();
-    NumType *lhs_nt = dynamic_cast<NumType *>(lhs_t);
-    NumType *rhs_nt = dynamic_cast<NumType *>(rhs_t);
-    PointerType *lhs_pt = dynamic_cast<PointerType *>(lhs_t);
-    PointerType *rhs_pt = dynamic_cast<PointerType *>(rhs_t);
-    LLVMValueRef L = LHS->gen_value()->gen_val();
-    LLVMValueRef R = RHS->gen_value()->gen_val();
-    if (lhs_nt && rhs_nt)
-      return new ConstValue(type, gen_num_num_binop(op, L, R, lhs_nt, rhs_nt));
-    else if (lhs_nt && rhs_pt)
-      return new ConstValue(type, gen_ptr_num_binop(op, R, L, rhs_pt, lhs_nt));
-    else if (lhs_pt && rhs_nt)
-      return new ConstValue(type, gen_ptr_num_binop(op, L, R, lhs_pt, rhs_nt));
-    else if (lhs_pt && rhs_pt)
-      return new ConstValue(type, gen_ptr_ptr_binop(op, L, R, lhs_pt, rhs_pt));
-    error("Unknown op " + token_to_str(op));
+    return gen_binop(op, LHS->gen_value()->gen_val(),
+                     RHS->gen_value()->gen_val(), LHS->get_type(),
+                     RHS->get_type());
   }
   // LLVM can constantify binary expressions if both sides are also constant.
   bool is_constant() { return LHS->is_constant() && RHS->is_constant(); }

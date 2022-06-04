@@ -533,7 +533,7 @@ static ExprAST *parse_asm_expr() {
 static ExprAST *parse_primary() {
   switch (curr_token) {
   default:
-    error("Error: unexpected token '" + token_to_str(curr_token) +
+    error("unexpected token '" + token_to_str(curr_token) +
           "' when expecting a primary");
   case T_IDENTIFIER:
     return parse_identifier_expr();
@@ -846,8 +846,8 @@ static std::string parse_include() {
   eat(T_INCLUDE);
   std::string path = string_value;
   if (curr_token != T_STRING) {
-    error("Error: Unexpected token after 'include': '" +
-          token_to_str(curr_token) + "', expected string");
+    error("Unexpected token after 'include': '" + token_to_str(curr_token) +
+          "', expected string");
   }
   return path;
 }
