@@ -664,19 +664,14 @@ static ExprAST *parse_bin_op_rhs(int expr_prec, ExprAST *LHS) {
     if (!binop_precedence.count(curr_token))
       return LHS; // doesn't exist
     int t_prec = binop_precedence[curr_token];
-    bool op_assign = false;
     // If this is a binop that binds at least as tightly as the current
     // binop, consume it, otherwise we are done.
     if (t_prec < expr_prec)
       return LHS;
 
     // Okay, we know this is a binop.
-    int bin_op = curr_token;
-    eat(bin_op);
-    if (curr_token == '=') { // do op and then assign to LHS
-      op_assign = true;
-      eat('=');
-    }
+    int op = curr_token;
+    eat(op);
     // Parse the primary expression after the binary operator.
     auto RHS = parse_unary();
 
@@ -687,11 +682,15 @@ static ExprAST *parse_bin_op_rhs(int expr_prec, ExprAST *LHS) {
       RHS = parse_bin_op_rhs(t_prec + 1, RHS);
 
     // Merge LHS/RHS.
-    auto op = new BinaryExprAST(bin_op, LHS, RHS);
-    if (op_assign) // assign LHS to op result
-      LHS = new BinaryExprAST('=', LHS, op);
+    if (op == '=')
+      LHS = new AssignExprAST(LHS, RHS);
+    else if (op == T_OR)
+      LHS = new OrExprAST(LHS, RHS);
+    else if (op_eq_ops.count(op))
+      // left = left op right
+      LHS = new AssignExprAST(LHS, new BinaryExprAST(op_eq_ops[op], LHS, RHS));
     else
-      LHS = op;
+      LHS = new BinaryExprAST(op, LHS, RHS);
   }
 }
 static ExprAST *parse_expr() {

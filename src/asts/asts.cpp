@@ -437,8 +437,10 @@ LLVMValueRef gen_ptr_num_binop(int op, LLVMValueRef ptr, LLVMValueRef num,
   case '+':
     return LLVMBuildGEP2(curr_builder, ptr_t->points_to->llvm_type(), ptr, &num,
                          1, "ptraddtmp");
-  default:
-    error("invalid ptr_num binary operator '" + token_to_str(op) + "'");
+  default: {
+    auto num2 = LLVMBuildPtrToInt(curr_builder, ptr, num_t->llvm_type(), UN);
+    return gen_num_num_binop(op, num2, num, num_t, num_t);
+  }
   }
 }
 LLVMValueRef gen_ptr_ptr_binop(int op, LLVMValueRef L, LLVMValueRef R,
@@ -448,10 +450,25 @@ LLVMValueRef gen_ptr_ptr_binop(int op, LLVMValueRef L, LLVMValueRef R,
     return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntEQ, L, R, UN);
   case T_NEQ:
     return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntNE, L, R, UN);
-  default:
-    error("invalid ptr_ptr binary operator '" + token_to_str(op) + "'");
+  default: {
+    NumType uint_ptrsize(false);
+    return gen_num_num_binop(op, L, R, &uint_ptrsize, &uint_ptrsize);
+  }
   }
 }
+
+class AssignExprAST : public ExprAST {
+  ExprAST *LHS, *RHS;
+
+public:
+  AssignExprAST(ExprAST *LHS, ExprAST *RHS) : LHS(LHS), RHS(RHS) {}
+  Type *get_type() { return LHS->get_type(); }
+  Value *gen_value() {
+    CastValue *val = RHS->gen_value()->cast_to(LHS->get_type());
+    LLVMBuildStore(curr_builder, val->gen_val(), LHS->gen_value()->gen_ptr());
+    return val;
+  }
+};
 
 /// BinaryExprAST - Expression class for a binary operator.
 class BinaryExprAST : public ExprAST {
@@ -459,18 +476,8 @@ class BinaryExprAST : public ExprAST {
   ExprAST *LHS, *RHS;
 
 public:
-  BinaryExprAST(int op, ExprAST *LHS, ExprAST *RHS) {
-    if (op_eq_ops.count(op)) {
-      // if the op is an assignment operator (like +=, -=, *=), then transform
-      // this binaryexpr into an assignment, and the RHS into the operator
-      // part. (basically transforms a+=1 into a=a+1)
-      RHS = new BinaryExprAST(op_eq_ops[op], LHS, RHS);
-      op = '=';
-    }
-    this->op = op;
-    this->LHS = LHS;
-    this->RHS = RHS;
-  }
+  BinaryExprAST(int op, ExprAST *LHS, ExprAST *RHS)
+      : op(op), LHS(LHS), RHS(RHS) {}
 
   Type *get_type() {
     Type *lhs_t = LHS->get_type();
@@ -478,9 +485,7 @@ public:
     TypeType lhs_tt = lhs_t->type_type();
     TypeType rhs_tt = rhs_t->type_type();
 
-    if (op == '=')
-      return lhs_t;
-    else if (binop_precedence[op] == comparison_prec)
+    if (binop_precedence[op] == comparison_prec)
       return BoolExprAST(true).get_type();
     else if (lhs_tt == TypeType::Number && rhs_tt == TypeType::Number)
       return lhs_t; // int + int returns int
@@ -494,14 +499,7 @@ public:
       error("Unknown op " + token_to_str(op));
   }
 
-  Value *gen_assign() {
-    CastValue *val = RHS->gen_value()->cast_to(LHS->get_type());
-    LLVMBuildStore(curr_builder, val->gen_val(), LHS->gen_value()->gen_ptr());
-    return val;
-  }
   Value *gen_value() {
-    if (op == '=')
-      return gen_assign();
     Type *type = get_type();
     Type *lhs_t = LHS->get_type();
     Type *rhs_t = RHS->get_type();
@@ -544,8 +542,6 @@ public:
   }
   Value *gen_value() {
     Type *type = get_type();
-    auto zero =
-        LLVMConstInt((new NumType(32, false, false))->llvm_type(), 0, false);
     Value *val = operand->gen_value();
     switch (op) {
     case '!':
@@ -1062,6 +1058,46 @@ public:
   Type *get_type() { return pick()->get_type(); }
   Value *gen_value() { return pick()->gen_value(); }
   bool is_constant() { return pick()->is_constant(); }
+};
+
+/// OrExprAST - Expression class for a short-circuiting or
+class OrExprAST : public ExprAST {
+public:
+  ExprAST *left, *right;
+  OrExprAST(ExprAST *left, ExprAST *right) : left(left), right(right) {}
+
+  Type *get_type() {
+    auto left_t = left->get_type();
+    auto right_t = right->get_type();
+    if (left_t->neq(right_t))
+      error("or's left and right side don't have the same type, " +
+            left_t->stringify() + " does not match " + right_t->stringify() +
+            ".");
+    return left_t;
+  }
+
+  Value *gen_value() {
+    auto type = get_type();
+    auto left_bb = LLVMGetInsertBlock(curr_builder);
+    auto left = this->left->gen_value();
+    // cast to bool
+    auto left_bool = left->cast_to(new NumType(1, false, false))->gen_val();
+    left_bb = LLVMGetInsertBlock(curr_builder);
+    auto func = LLVMGetBasicBlockParent(left_bb);
+    auto right_bb = LLVMAppendBasicBlockInContext(curr_ctx, func, UN);
+    auto merge_bb = LLVMCreateBasicBlockInContext(curr_ctx, UN);
+    // if left is true, skip right
+    LLVMBuildCondBr(curr_builder, left_bool, merge_bb, right_bb);
+    LLVMPositionBuilderAtEnd(curr_builder, right_bb);
+    auto right = this->right->gen_value();
+    LLVMBuildBr(curr_builder, merge_bb);
+    // right can change the current block, update then_bb for the PHI.
+    right_bb = LLVMGetInsertBlock(curr_builder);
+    // merge
+    LLVMAppendExistingBasicBlock(func, merge_bb);
+    LLVMPositionBuilderAtEnd(curr_builder, merge_bb);
+    return gen_phi(left_bb, left, right_bb, right);
+  }
 };
 
 /// IfExprAST - Expression class for if/then/else.

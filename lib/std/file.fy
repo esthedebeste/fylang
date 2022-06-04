@@ -4,10 +4,10 @@ include "utils.fy"
 
 type File = *FILE
 
-inline fun open_file(path: char[generic Len] | *char, mode: char[generic Len] | *char): { err: bool, file: File } {
+inline fun open_file(path: char[generic Len] | *char, mode: char[generic Len] | *char[generic Len] | *char): { err: bool, file: File } {
 	// convert char[Len] to *char for fopen
-	const ppath = if(typeof(path) == *char) path else temp_c_str(path)
-	const pmode = if(typeof(mode) == *char) mode else temp_c_str(mode)
+	const ppath: *char = if(typeof(path) == char[generic Len]) temp_c_str(path) else path
+	const pmode: *char = if(typeof(mode) == char[generic Len]) temp_c_str(mode) else mode
 	const file: File = fopen(path, mode)
 	return (/*err: */file == nullptr, /*file: */file)
 }
