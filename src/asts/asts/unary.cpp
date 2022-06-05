@@ -51,3 +51,8 @@ Value *UnaryExprAST::gen_value() {
     error("invalid prefix unary operator '" + token_to_str(op) + "'");
   }
 }
+bool UnaryExprAST::is_constant() {
+  if (op == T_RETURN || op == '*')
+    return false;
+  return operand->is_constant();
+}

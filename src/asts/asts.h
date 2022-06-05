@@ -85,6 +85,7 @@ public:
   VariableExprAST(std::string name);
   Type *get_type();
   Value *gen_value();
+  bool is_constant();
 };
 
 extern std::vector<std::pair<LLVMValueRef, ExprAST *>> inits;
@@ -134,24 +135,29 @@ public:
   bool is_constant() { return true; }
 };
 
-template <typename CharT> class CStringExprAST : public ExprAST {
+template <typename CharT> class PtrStringExprAST : public ExprAST {
   inline static NumType char_type{NumType(sizeof(CharT) * 8, false, false)};
   ArrayType t_type;
   PointerType p_type;
-  std::basic_string<CharT> str;
 
 public:
-  CStringExprAST(std::basic_string<CharT> str)
-      : str(str), t_type(&char_type, str.size() + 1), p_type(&this->t_type) {}
+  std::basic_string<CharT> str;
+  bool null_terminated;
+  PtrStringExprAST(std::basic_string<CharT> str, bool null_terminated)
+      : str(str), t_type(&char_type, str.size() + null_terminated),
+        p_type(&this->t_type), null_terminated(null_terminated) {}
   Type *get_type() { return &p_type; }
   Value *gen_value() {
     auto len = str.size();
-    LLVMValueRef *vals = new LLVMValueRef[len + 1];
+    LLVMValueRef *vals = new LLVMValueRef[len + null_terminated];
     for (size_t i = 0; i < len; i++)
       vals[i] = LLVMConstInt(char_type.llvm_type(), str[i], false);
-    vals[len] = LLVMConstNull(char_type.llvm_type());
-    auto array = LLVMConstArray(char_type.llvm_type(), vals, len + 1);
-    LLVMValueRef ptr = LLVMAddGlobal(curr_module, t_type.llvm_type(), ".c_str");
+    if (null_terminated)
+      vals[len] = LLVMConstNull(char_type.llvm_type());
+    auto array =
+        LLVMConstArray(char_type.llvm_type(), vals, len + null_terminated);
+    LLVMValueRef ptr = LLVMAddGlobal(curr_module, t_type.llvm_type(),
+                                     null_terminated ? ".c_str" : ".str");
     LLVMSetInitializer(ptr, array);
     LLVMSetGlobalConstant(ptr, true);
     LLVMValueRef cast =
@@ -193,7 +199,6 @@ public:
   Type *get_type();
 
   Value *gen_value();
-  // LLVM can constantify binary expressions if both sides are also constant.
   bool is_constant();
 };
 /// UnaryExprAST - Expression class for a unary operator.
@@ -205,6 +210,7 @@ public:
   UnaryExprAST(int op, ExprAST *operand);
   Type *get_type();
   Value *gen_value();
+  bool is_constant();
 };
 
 /// ValueCallExprAST - For calling a value (often a function pointer)

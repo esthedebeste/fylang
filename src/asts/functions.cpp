@@ -81,10 +81,8 @@ FunctionType *FunctionAST::get_type(std::vector<ExprAST *> args) {
 // Returns PHI of return value, moves to return block
 LLVMValueRef FunctionAST::gen_body(LLVMValueRef *args, FunctionType *type) {
   for (size_t i = 0; i < this->args.size(); i++)
-    curr_scope->set_variable(
-        this->args[i].first,
-        new NamedValue(new ConstValue(type->arguments[i], args[i]),
-                       this->args[i].first));
+    curr_scope->set_variable(this->args[i].first,
+                             new ConstValue(type->arguments[i], args[i]));
   ReturnState prev_return_state = curr_return_state;
   LLVMBasicBlockRef body_bb = LLVMGetInsertBlock(curr_builder);
   LLVMBasicBlockRef ret_bb =

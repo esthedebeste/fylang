@@ -103,16 +103,14 @@ LLVMValueRef gen_ptr_num_binop(int op, LLVMValueRef ptr, LLVMValueRef num,
 }
 LLVMValueRef gen_ptr_ptr_binop(int op, LLVMValueRef L, LLVMValueRef R,
                                PointerType *lhs_ptr, PointerType *rhs_pt) {
-  switch (op) {
-  case T_EQEQ:
-    return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntEQ, L, R, UN);
-  case T_NEQ:
-    return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntNE, L, R, UN);
-  default: {
-    NumType uint_ptrsize(false);
-    return gen_num_num_binop(op, L, R, &uint_ptrsize, &uint_ptrsize);
-  }
-  }
+  NumType uint_ptrsize(false);
+  auto il = LLVMBuildPtrToInt(curr_builder, L, uint_ptrsize.llvm_type(), UN);
+  auto ir = LLVMBuildPtrToInt(curr_builder, R, uint_ptrsize.llvm_type(), UN);
+  auto result = gen_num_num_binop(op, il, ir, &uint_ptrsize, &uint_ptrsize);
+  if (binop_precedence[op] == comparison_prec)
+    return result;
+  else
+    return LLVMBuildIntToPtr(curr_builder, result, lhs_ptr->llvm_type(), UN);
 }
 
 LLVMValueRef gen_arr_arr_binop(int op, LLVMValueRef L, LLVMValueRef R,
@@ -164,6 +162,8 @@ Type *get_binop_type(int op, Type *lhs_t, Type *rhs_t) {
     return /* ptr */ rhs_t;
   else if (lhs_tt == Array && rhs_tt == Array)
     return lhs_t; // array + array returns array
+  else if (lhs_tt == Pointer && rhs_tt == Pointer)
+    return lhs_t; // ptr + ptr returns ptr
   error("Unknown op " + token_to_str(op) + " for types " + lhs_t->stringify() +
         " and " + rhs_t->stringify());
 }

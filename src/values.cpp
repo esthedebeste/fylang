@@ -7,6 +7,7 @@ LLVMValueRef ConstValue::gen_ptr() {
   error("Const values can't be pointered");
 };
 bool ConstValue::has_ptr() { return false; }
+bool ConstValue::is_constant() { return LLVMIsConstant(val); }
 
 ConstValueWithPtr::ConstValueWithPtr(Type *type, LLVMValueRef ptr,
                                      LLVMValueRef val)
@@ -15,6 +16,9 @@ Type *ConstValueWithPtr::get_type() { return type; };
 LLVMValueRef ConstValueWithPtr::gen_val() { return val; };
 LLVMValueRef ConstValueWithPtr::gen_ptr() { return ptr; };
 bool ConstValueWithPtr::has_ptr() { return true; }
+bool ConstValueWithPtr::is_constant() {
+  return LLVMIsConstant(val) && LLVMIsConstant(ptr);
+}
 
 IntValue::IntValue(NumType type, uint64_t val) : type(type), val(val) {}
 Type *IntValue::get_type() { return &type; };
@@ -23,12 +27,14 @@ LLVMValueRef IntValue::gen_val() {
 };
 LLVMValueRef IntValue::gen_ptr() { error("Int values can't be pointered"); };
 bool IntValue::has_ptr() { return false; }
+bool IntValue::is_constant() { return true; }
 
 FuncValue::FuncValue(Type *type, LLVMValueRef func) : type(type), func(func) {}
 Type *FuncValue::get_type() { return type; };
 LLVMValueRef FuncValue::gen_val() { return func; };
 LLVMValueRef FuncValue::gen_ptr() { return func; };
 bool FuncValue::has_ptr() { return true; }
+bool FuncValue::is_constant() { return true; }
 
 BasicLoadValue::BasicLoadValue(Type *type, LLVMValueRef variable)
     : type(type), variable(variable) {}
@@ -38,6 +44,7 @@ LLVMValueRef BasicLoadValue::gen_val() {
 };
 LLVMValueRef BasicLoadValue::gen_ptr() { return variable; };
 bool BasicLoadValue::has_ptr() { return true; }
+bool BasicLoadValue::is_constant() { return false; }
 
 ConstValue *gen_phi(LLVMBasicBlockRef a_bb, Value *a_v, LLVMBasicBlockRef b_bb,
                     Value *b_v) {
@@ -166,19 +173,6 @@ Type *CastValue::get_type() { return to; }
 LLVMValueRef CastValue::gen_val() { return cast(source, to); }
 LLVMValueRef CastValue::gen_ptr() { error("Can't get the pointer to a cast"); }
 bool CastValue::has_ptr() { return false; }
+bool CastValue::is_constant() { return source->is_constant(); }
 
 CastValue *Value::cast_to(Type *to) { return new CastValue(this, to); }
-
-NamedValue::NamedValue(Value *val, std::string name) : val(val), name(name) {}
-Type *NamedValue::get_type() { return val->get_type(); }
-LLVMValueRef NamedValue::gen_val() {
-  LLVMValueRef value = val->gen_val();
-  LLVMSetValueName2(value, name.c_str(), name.size());
-  return value;
-}
-LLVMValueRef NamedValue::gen_ptr() {
-  LLVMValueRef value = val->gen_ptr();
-  LLVMSetValueName2(value, name.c_str(), name.size());
-  return value;
-}
-bool NamedValue::has_ptr() { return val->has_ptr(); }

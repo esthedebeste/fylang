@@ -244,7 +244,9 @@ ExprAST *parse_string_expr() {
             deletable_facet<std::codecvt<type, char, std::mbstate_t>>, type>{} \
             .from_bytes(str);                                                  \
     if (string_type == C_STRING)                                               \
-      return new CStringExprAST<type>(converted_str);                          \
+      return new PtrStringExprAST<type>(converted_str, true);                  \
+    if (string_type == PTR_CHAR_ARRAY)                                         \
+      return new PtrStringExprAST<type>(converted_str, false);                 \
     else                                                                       \
       return new StringExprAST<type>(converted_str);                           \
   }

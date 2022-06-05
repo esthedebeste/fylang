@@ -10,6 +10,7 @@ public:
   virtual LLVMValueRef gen_val() = 0;
   virtual LLVMValueRef gen_ptr() = 0;
   virtual bool has_ptr() = 0;
+  virtual bool is_constant() = 0;
   CastValue *cast_to(Type *type);
 };
 /// ConstValue - Constant value with no pointer.
@@ -22,6 +23,7 @@ public:
   LLVMValueRef gen_val();
   LLVMValueRef gen_ptr();
   bool has_ptr();
+  bool is_constant();
 };
 /// ConstValueWithPtr - Constant value with a pointer to it's data.
 class ConstValueWithPtr : public Value {
@@ -34,6 +36,7 @@ public:
   LLVMValueRef gen_val();
   LLVMValueRef gen_ptr();
   bool has_ptr();
+  bool is_constant();
 };
 /// IntValue - Integer value.
 class IntValue : public Value {
@@ -45,6 +48,7 @@ public:
   LLVMValueRef gen_val();
   LLVMValueRef gen_ptr();
   bool has_ptr();
+  bool is_constant();
 };
 /// FuncValue - For functions
 class FuncValue : public Value {
@@ -56,6 +60,7 @@ public:
   LLVMValueRef gen_val();
   LLVMValueRef gen_ptr();
   bool has_ptr();
+  bool is_constant();
 };
 /// BasicLoadValue - generates a load op.
 class BasicLoadValue : public Value {
@@ -67,6 +72,7 @@ public:
   LLVMValueRef gen_val();
   LLVMValueRef gen_ptr();
   bool has_ptr();
+  bool is_constant();
 };
 
 ConstValue *gen_phi(LLVMBasicBlockRef a_bb, Value *a_v, LLVMBasicBlockRef b_bb,
@@ -86,15 +92,5 @@ public:
   LLVMValueRef gen_val();
   LLVMValueRef gen_ptr();
   bool has_ptr();
-};
-
-class NamedValue : public Value {
-public:
-  Value *val;
-  std::string name;
-  NamedValue(Value *val, std::string name);
-  Type *get_type();
-  LLVMValueRef gen_val();
-  LLVMValueRef gen_ptr();
-  bool has_ptr();
+  bool is_constant();
 };

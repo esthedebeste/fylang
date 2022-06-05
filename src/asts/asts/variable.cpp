@@ -17,3 +17,11 @@ Value *VariableExprAST::gen_value() {
   else
     error("Variable '" + name + "' doesn't exist.");
 }
+bool VariableExprAST::is_constant() {
+  if (auto var = curr_scope->get_named_variable(name))
+    return var->is_constant();
+  else if (curr_named_functions.count(name))
+    return true;
+  else
+    error("Variable '" + name + "' doesn't exist.");
+}

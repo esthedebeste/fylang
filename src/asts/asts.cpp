@@ -4,11 +4,9 @@ Value *build_malloc(Type *type) {
   if (!curr_named_functions.count("malloc"))
     error("malloc not defined before using 'new', maybe add 'include "
           "\"c/stdlib\"'?");
-  return new NamedValue(
-      curr_named_functions["malloc"]
-          ->gen_call({SizeofExprAST(type_ast(type)).gen_value()})
-          ->cast_to(type->ptr()),
-      "malloc_" + type->stringify());
+  return curr_named_functions["malloc"]
+      ->gen_call({SizeofExprAST(type_ast(type)).gen_value()})
+      ->cast_to(type->ptr());
 }
 
 ExprAST::~ExprAST() {}

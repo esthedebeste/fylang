@@ -1,4 +1,5 @@
 #include "lexer.h"
+#include <sstream>
 
 std::string
     identifier_string; // [a-zA-Z][a-zA-Z0-9]* - Filled in if T_IDENTIFIER
@@ -146,6 +147,9 @@ int next_token() {
     last_char = next_char();
     if (last_char == 'c') {
       string_type = C_STRING;
+      last_char = next_char();
+    } else if (last_char == 'p') {
+      string_type = PTR_CHAR_ARRAY;
       last_char = next_char();
     } else
       string_type = CHAR_ARRAY;

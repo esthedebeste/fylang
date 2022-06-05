@@ -12,9 +12,8 @@ extern bool
 extern char num_type; // Type of number. 'd' => double, 'f' => float, 'i' =>
                       // int32, 'u' => uint32, 'b' => byte/char/uint8
 extern std::string string_value; // "[^"]*" - Filled in if T_STRING
-enum StringType { C_STRING, CHAR_ARRAY };
-extern StringType
-    string_type; // Type of string. 'c' => C-string, otherwise char[len]
+enum StringType { C_STRING, CHAR_ARRAY, PTR_CHAR_ARRAY };
+extern StringType string_type; // Type of string
 
 std::string token_to_str(const int token);
 extern char last_char;

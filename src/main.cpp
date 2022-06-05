@@ -182,6 +182,7 @@ int main(int argc, char **argv, char **envp) {
     if (!main_function)
       error("No main function found, cannot run");
     LLVMInitializeNativeAsmPrinter();
+    LLVMInitializeNativeAsmParser();
     LLVMLinkInMCJIT();
     LLVMExecutionEngineRef engine;
     char *err;
