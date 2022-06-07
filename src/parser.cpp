@@ -306,7 +306,9 @@ ExprAST *parse_identifier_expr() {
 ///   ::= 'if' ('type' type == type) expression ('else' expression)?
 ExprAST *parse_if_expr() {
   eat(T_IF);
-  eat('(');
+  bool paren = curr_token == '(';
+  if (paren)
+    eat('(');
   enum { EXPR_IF, TYPE_IF } returning = EXPR_IF;
   ExprAST *cond;
   TypeAST *a, *b;
@@ -320,7 +322,8 @@ ExprAST *parse_if_expr() {
     returning = TYPE_IF;
   } else
     cond = parse_expr();
-  eat(')');
+  if (paren)
+    eat(')');
   auto then = parse_expr();
   ExprAST *elze = nullptr;
   if (curr_token == T_ELSE) {
@@ -338,7 +341,7 @@ ExprAST *parse_if_expr() {
 /// whileexpr ::= 'while' (expression) expression else expression
 WhileExprAST *parse_while_expr() {
   eat(T_WHILE);
-  auto cond = parse_paren_expr();
+  auto cond = parse_expr();
   auto then = parse_expr();
   ExprAST *elze = nullptr;
   if (curr_token == T_ELSE) {
@@ -350,13 +353,16 @@ WhileExprAST *parse_while_expr() {
 /// forexpr ::= 'for' (expr; expr; expr) expr else expr
 ForExprAST *parse_for_expr() {
   eat(T_FOR);
-  eat('(');
+  bool paren = curr_token == '(';
+  if (paren)
+    eat('(');
   auto init = parse_expr(); // let i = 0
   eat(';');                 // ;
   auto cond = parse_expr(); // i < 5
   eat(';');                 // ;
   auto post = parse_expr(); // i = i + 1
-  eat(')');
+  if (paren)
+    eat(')');
   auto body = parse_expr();
   ExprAST *elze = nullptr;
   if (curr_token == T_ELSE) {
