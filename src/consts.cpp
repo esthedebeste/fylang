@@ -114,7 +114,7 @@ std::unordered_map<std::string, Token> keywords = {
     {"or", T_OR},
 };
 
-std::unordered_set<int> unaries = {'!', '*', '&', '+', '-', T_RETURN};
+std::unordered_set<int> unaries = {'!', '~', '*', '&', '+', '-', T_RETURN};
 std::unordered_set<int> type_unaries = {'*', '&', T_UNSIGNED, T_SIGNED};
 
 // clang-format off

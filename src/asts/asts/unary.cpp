@@ -36,6 +36,12 @@ Value *UnaryExprAST::gen_value() {
                             val->gen_val(), num_type, num_type));
     else
       error("'-' unary op can only be used on numbers");
+  case '~':
+    if (NumType *num_type = dynamic_cast<NumType *>(val->get_type()))
+      return new ConstValue(num_type,
+                            LLVMBuildNot(curr_builder, val->gen_val(), UN));
+    else
+      error("'~' unary op can only be used on numbers");
   case '*':
     return new BasicLoadValue(type, val->gen_val());
   case '&':
