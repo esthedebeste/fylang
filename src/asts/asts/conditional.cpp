@@ -7,26 +7,32 @@ Type *OrExprAST::get_type() {
   auto left_t = left->get_type();
   auto right_t = right->get_type();
   if (left_t->neq(right_t))
-    error("or's left and right side don't have the same type, " +
+    error("and/or's left and right side don't have the same type, " +
           left_t->stringify() + " does not match " + right_t->stringify() +
           ".");
   return left_t;
 }
 
-Value *OrExprAST::gen_value() {
-  auto type = get_type();
+enum Shortcircuit { Or, And };
+Value *gen_shortcircuit(Type *type, ExprAST *lefte, ExprAST *righte,
+                        Shortcircuit sc_type) {
   auto left_bb = LLVMGetInsertBlock(curr_builder);
-  auto left = this->left->gen_value();
+  auto left = lefte->gen_value();
   // cast to bool
   auto left_bool = left->cast_to(new NumType(1, false, false))->gen_val();
   left_bb = LLVMGetInsertBlock(curr_builder);
   auto func = LLVMGetBasicBlockParent(left_bb);
   auto right_bb = LLVMAppendBasicBlockInContext(curr_ctx, func, UN);
   auto merge_bb = LLVMCreateBasicBlockInContext(curr_ctx, UN);
-  // if left is true, skip right
-  LLVMBuildCondBr(curr_builder, left_bool, merge_bb, right_bb);
+  if (sc_type == Or) {
+    // if left is true, skip right
+    LLVMBuildCondBr(curr_builder, left_bool, merge_bb, right_bb);
+  } else /* sc_type == And */ {
+    // if left is false, skip right
+    LLVMBuildCondBr(curr_builder, left_bool, right_bb, left_bb);
+  }
   LLVMPositionBuilderAtEnd(curr_builder, right_bb);
-  auto right = this->right->gen_value();
+  auto right = righte->gen_value();
   LLVMBuildBr(curr_builder, merge_bb);
   // right can change the current block, update then_bb for the PHI.
   right_bb = LLVMGetInsertBlock(curr_builder);
@@ -34,6 +40,14 @@ Value *OrExprAST::gen_value() {
   LLVMAppendExistingBasicBlock(func, merge_bb);
   LLVMPositionBuilderAtEnd(curr_builder, merge_bb);
   return gen_phi(left_bb, left, right_bb, right);
+}
+
+Value *OrExprAST::gen_value() {
+  return gen_shortcircuit(get_type(), left, right, Or);
+}
+
+Value *AndExprAST::gen_value() {
+  return gen_shortcircuit(get_type(), left, right, And);
 }
 
 void IfExprAST::init() {

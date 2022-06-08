@@ -554,6 +554,12 @@ ExprAST *parse_primary() {
   case T_NULL:
     eat(T_NULL);
     return new NullExprAST();
+  case T_CONTINUE:
+    eat(T_CONTINUE);
+    return new ContinueExprAST();
+  case T_BREAK:
+    eat(T_BREAK);
+    return new BreakExprAST();
   case T_STRING:
     return parse_string_expr();
   case '(':
@@ -696,6 +702,8 @@ ExprAST *parse_bin_op_rhs(int expr_prec, ExprAST *LHS) {
       LHS = new AssignExprAST(LHS, RHS);
     else if (op == T_OR)
       LHS = new OrExprAST(LHS, RHS);
+    else if (op == T_AND)
+      LHS = new AndExprAST(LHS, RHS);
     else if (op_eq_ops.count(op))
       // left = left op right
       LHS = new AssignExprAST(LHS, new BinaryExprAST(op_eq_ops[op], LHS, RHS));

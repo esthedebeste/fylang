@@ -10,9 +10,10 @@ bool Type::operator!=(Type *other) { return neq(other); }
 PointerType *Type::ptr() { return new PointerType(this); }
 template <typename T> inline size_t hash(T t) { return std::hash<T>()(t); }
 
+LLVMTypeRef llvm_null = LLVMStructType(nullptr, 0, true);
 NullType null_type = NullType();
 NullType::NullType() {}
-LLVMTypeRef NullType::llvm_type() { return LLVMStructType(nullptr, 0, true); }
+LLVMTypeRef NullType::llvm_type() { return llvm_null; }
 TypeType NullType::type_type() { return TypeType::Null; }
 bool NullType::eq(Type *other) { return other->type_type() == TypeType::Null; }
 bool NullType::castable_to(Type *other) { return true; }

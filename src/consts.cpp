@@ -12,7 +12,7 @@ std::unordered_map<int, int> binop_precedence = {
     {'=', 1},       {T_PLUSEQ, 1},    {T_MINEQ, 1},   {T_STAREQ, 1},
     {T_SLASHEQ, 1}, {T_PERCENTEQ, 1}, {T_ANDEQ, 1},   {T_OREQ, 1},
 #define logical_prec 5
-    {T_LOR, 5},     {T_LAND, 5},      {T_OR, 5},
+    {T_LOR, 5},     {T_LAND, 5},      {T_OR, 5},      {T_AND, 5},
 #define comparison_prec 10
     {'<', 10},      {'>', 10},        {T_EQEQ, 10},   {T_LEQ, 10},
     {T_GEQ, 10},    {T_NEQ, 10},
@@ -80,6 +80,9 @@ std::unordered_map<Token, std::string> token_strs = {
     {T_INLINE, "inline"},
     {T_ASM, "__asm__"},
     {T_OR, "or"},
+    {T_AND, "and"},
+    {T_CONTINUE, "continue"},
+    {T_BREAK, "break"},
 };
 
 std::unordered_map<std::string, Token> keywords = {
@@ -112,6 +115,9 @@ std::unordered_map<std::string, Token> keywords = {
     {"inline", T_INLINE},
     {"__asm__", T_ASM},
     {"or", T_OR},
+    {"and", T_AND},
+    {"continue", T_CONTINUE},
+    {"break", T_BREAK},
 };
 
 std::unordered_set<int> unaries = {'!', '~', '*', '&', '+', '-', T_RETURN};

@@ -28,6 +28,12 @@ extern Scope *curr_scope;
 Scope *push_scope();
 Scope *pop_scope();
 
+struct LoopState {
+  LLVMBasicBlockRef break_block;
+  LLVMBasicBlockRef continue_block;
+};
+extern std::vector<LoopState> loop_stack;
+
 Value *build_malloc(Type *type);
 
 /// SizeofExprAST - Expression class to get the byte size of a type
@@ -349,7 +355,7 @@ public:
   Value *gen_value();
 };
 
-ConstValue *null_value(Type *type);
+ConstValue *null_value(Type *type = &null_type);
 /// NullExprAST - null
 class NullExprAST : public ExprAST {
 public:
@@ -403,6 +409,28 @@ public:
   Value *gen_value();
 };
 
+/// AndExprAST - Expression class for a short-circuiting and
+class AndExprAST : public OrExprAST {
+public:
+  using OrExprAST::OrExprAST;
+  Value *gen_value();
+};
+
+/// ContinueExprAST - Expression class for skipping to the next iteration
+class ContinueExprAST : public ExprAST {
+public:
+  ContinueExprAST();
+  Type *get_type();
+  Value *gen_value();
+};
+/// BreakExprAST - Expression class for breaking out of a loop
+class BreakExprAST : public ExprAST {
+public:
+  BreakExprAST();
+  Type *get_type();
+  Value *gen_value();
+};
+
 /// IfExprAST - Expression class for if/then/else.
 class IfExprAST : public ExprAST {
 public:
@@ -420,15 +448,17 @@ public:
 };
 
 /// WhileExprAST - Expression class for while loops.
-class WhileExprAST : public IfExprAST {
+class WhileExprAST : public ExprAST {
+  ExprAST *cond, *body, *elze;
+
 public:
-  using IfExprAST::IfExprAST; // inherit constructor from IfExprAST
+  WhileExprAST(ExprAST *cond, ExprAST *body, ExprAST *elze);
+  Type *get_type();
   Value *gen_value();
 };
 
-class ForExprAST : public IfExprAST {
-  ExprAST *init;
-  ExprAST *post;
+class ForExprAST : public ExprAST {
+  ExprAST *init, *cond, *body, *post, *elze;
 
 public:
   ForExprAST(ExprAST *init, ExprAST *cond, ExprAST *body, ExprAST *post,

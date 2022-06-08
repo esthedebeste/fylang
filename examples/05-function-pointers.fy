@@ -6,8 +6,9 @@ include "std/utils"
 fun print_filtered(str: *char, length: uint_ptrsize, predicate: *fun(ch: char): bool) {
 	for(let i = 0; i < length; i += 1) {
 		const char = str[i]
-		if(predicate(char))
-			print(char)
+		if(!predicate(char))
+			continue
+		print(char)
 	}
 }
 

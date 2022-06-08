@@ -63,6 +63,9 @@ enum Token : const int {
   T_INLINE,        // inline
   T_ASM,           // __asm__
   T_OR,            // or
+  T_AND,           // and
+  T_CONTINUE,      // continue
+  T_BREAK,         // break
 };
 
 extern LLVMContextRef curr_ctx;
