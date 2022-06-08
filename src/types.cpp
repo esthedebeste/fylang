@@ -23,14 +23,6 @@ NumType::NumType(unsigned int bits, bool is_floating, bool is_signed)
     : bits(bits), is_floating(is_floating), is_signed(is_signed) {
   byte_size = bits / 8;
 }
-NumType::NumType(std::string bits_str, bool is_floating, bool is_signed)
-    : is_floating(is_floating), is_signed(is_signed) {
-  if (bits_str == "_ptrsize")
-    bits = LLVMPointerSize(target_data) * 8;
-  else
-    bits = std::stoi(bits_str);
-  byte_size = bits / 8;
-}
 NumType::NumType(bool is_signed) : is_floating(false), is_signed(is_signed) {
   byte_size = LLVMPointerSize(target_data);
   bits = byte_size * 8;

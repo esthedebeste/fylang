@@ -33,7 +33,6 @@ Type *AbsoluteTypeAST::type() { return typ; }
 bool AbsoluteTypeAST::eq(TypeAST *other) { return typ->eq(other->type()); }
 bool AbsoluteTypeAST::match(Type *type, uint *g) { return typ->eq(type); }
 bool AbsoluteTypeAST::is_generic() { return false; }
-TypeAST *type_ast(Type *t) { return new AbsoluteTypeAST(t); }
 
 UnaryTypeAST::UnaryTypeAST(int opc, TypeAST *operand)
     : opc(opc), operand(operand) {}

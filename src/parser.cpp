@@ -47,19 +47,36 @@ TypeAST *parse_function_type() {
   return new FunctionTypeAST(return_type, arg_types, flags);
 }
 
+bool is_num(std::string str) {
+  for (char c : str)
+    if (c < '0' || c > '9')
+      return false;
+  return true;
+}
+
+NumType *numtype(std::string prefix, std::string value, bool is_float,
+                 bool is_signed) {
+  if (!value.starts_with(prefix))
+    return nullptr;
+  std::string post = value.substr(prefix.size());
+  if (post.size() == 0)
+    return new NumType(32, is_float, is_signed);
+  if (is_num(post))
+    return new NumType(std::stoi(post), is_float, is_signed);
+  if (post == "_ptrsize")
+    return new NumType(is_signed);
+  return nullptr;
+}
+
 TypeAST *parse_num_type() {
   std::string id = identifier_string;
   eat(T_IDENTIFIER);
-#define strlen(str) (sizeof(str) - 1)
-#define check_type(str, flt, sgn)                                              \
-  if (id.find(str) == 0)                                                       \
-    if (id.size() == strlen(str))                                              \
-      return type_ast(new NumType(32, flt, sgn));                              \
-    else                                                                       \
-      return type_ast(new NumType(id.substr(strlen(str)), flt, sgn))
-  check_type("uint", false, false);
-  else check_type("int", false, true);
-  else check_type("float", true, true);
+  if (NumType *num = numtype("uint", id, false, false))
+    return type_ast(num);
+  else if (NumType *num = numtype("int", id, false, true))
+    return type_ast(num);
+  else if (NumType *num = numtype("float", id, true, true))
+    return type_ast(num);
   else if (curr_token == '<') {
     eat('<');
     std::vector<TypeAST *> args;
@@ -71,10 +88,8 @@ TypeAST *parse_num_type() {
     }
     eat('>');
     return new GenericAccessAST(id, args);
-  }
-  else return new NamedTypeAST(id);
-#undef strlen
-#undef check_type
+  } else
+    return new NamedTypeAST(id);
 }
 
 TypeDefAST *parse_type_definition() {

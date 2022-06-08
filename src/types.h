@@ -59,7 +59,6 @@ public:
   bool is_floating;
   bool is_signed;
   NumType(unsigned int bits, bool is_floating, bool is_signed);
-  NumType(std::string bits_str, bool is_floating, bool is_signed);
   // Pointer-size
   explicit NumType(bool is_signed);
   // exists for maps, do not use.

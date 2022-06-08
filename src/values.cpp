@@ -96,13 +96,13 @@ LLVMValueRef gen_num_cast(LLVMValueRef value, NumType *a, Type *b) {
 LLVMValueRef gen_ptr_cast(LLVMValueRef value, PointerType *a, Type *b) {
   if (b->type_type() == TypeType::Pointer)
     return LLVMBuildPointerCast(curr_builder, value, b->llvm_type(), UN);
-  else if (NumType *num = dynamic_cast<NumType *>(b))
+  else if (NumType *num = dynamic_cast<NumType *>(b)) {
     if (num->bits != 1)
       return LLVMBuildPtrToInt(curr_builder, value, b->llvm_type(), UN);
     else /* x != 0 */
       return LLVMBuildICmp(curr_builder, LLVMIntPredicate::LLVMIntNE, value,
                            LLVMConstNull(a->llvm_type()), UN);
-
+  }
   error(a->stringify() + " can't be casted to " + b->stringify());
 }
 
