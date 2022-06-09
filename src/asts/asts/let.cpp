@@ -39,7 +39,8 @@ Value *LetExprAST::gen_value() {
   Type *type = get_type();
   if (constant) {
     if (value) {
-      auto val = value->gen_value()->cast_to(type);
+      auto val =
+          new ConstValue(type, value->gen_value()->cast_to(type)->gen_val());
       curr_scope->set_variable(id, val);
       return val;
     } else
