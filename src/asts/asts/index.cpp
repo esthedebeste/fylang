@@ -58,6 +58,9 @@ Type *NumAccessExprAST::get_type() {
 Value *NumAccessExprAST::gen_value() {
   Type *type = get_type();
   Value *src = source->gen_value();
+  if (!is_ptr && !src->has_ptr())
+    return new ConstValue(
+        type, LLVMBuildExtractValue(curr_builder, src->gen_val(), index, UN));
   // If src is a struct-pointer (*String) then access on the value, if src
   // is a struct-value (String) then access on the pointer to where it's
   // stored.

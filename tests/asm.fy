@@ -1,6 +1,16 @@
 include "c/stdio"
+
+declare fun four cc(C)(): int
+__asm__(".globl four
+		.type four, @function
+		four:
+		.cfi_startproc
+		movl $4, %eax
+		ret
+		.cfi_endproc")
+
 fun main() {
-	let a = 4
+	let a = four()
 	// 		returns int32  copy eax to ebx 	outreg is ebx  load a into eax
 	const b = __asm__ int("mov %eax, %ebx" => 	ebx)		(eax = a)
 	if(b == 4)	puts("OK"c)

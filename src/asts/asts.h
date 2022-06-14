@@ -251,6 +251,15 @@ public:
   Value *gen_value();
 };
 
+/// GlobalASMExprAST - Module-level inline assembly
+class GlobalASMExprAST {
+  std::string asm_str;
+
+public:
+  GlobalASMExprAST(std::string asm_str);
+  void gen_toplevel();
+};
+
 class NameCallExprAST : public ExprAST {
 public:
   std::string name;

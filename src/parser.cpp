@@ -536,6 +536,14 @@ ExprAST *parse_asm_expr() {
   auto args = parse_asm_expr_params();
   return new ASMExprAST(type, asm_str, output_reg, args);
 }
+
+GlobalASMExprAST *parse_global_asm() {
+  eat(T_ASM);
+  eat('(');
+  std::string asm_str = eat_string();
+  eat(')');
+  return new GlobalASMExprAST(asm_str);
+}
 /// primary
 ///   ::= identifierexpr
 ///   ::= numberexpr

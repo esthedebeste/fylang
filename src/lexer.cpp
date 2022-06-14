@@ -111,10 +111,16 @@ int next_token() {
   num_while:
     while (true) {
       if (num_base == 16   ? !isxdigit(last_char)
-          : num_base == 10 ? !isdigit(last_char)
+          : num_base == 10 ? !(isdigit(last_char) || last_char == '.')
           : num_base == 8  ? last_char < '0' || last_char > '7'
                            : last_char < '0' || last_char > '1')
         break;
+      if (last_char == '.') {
+        if (num_has_dot)
+          break;
+        else
+          num_has_dot = true;
+      }
       stream << last_char;
       last_char = next_char();
     }

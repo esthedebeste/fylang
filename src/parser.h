@@ -43,6 +43,7 @@ ExprAST *parse_type_assertion();
 ExprAST *parse_type_dump();
 std::vector<std::pair<std::string, ExprAST *>> parse_asm_expr_params();
 ExprAST *parse_asm_expr();
+GlobalASMExprAST *parse_global_asm();
 ExprAST *parse_primary();
 ExprAST *parse_postfix();
 ExprAST *parse_unary();

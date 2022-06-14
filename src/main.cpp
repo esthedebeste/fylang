@@ -33,6 +33,12 @@ void handle_global_type() {
   debug_log("Parsed a type definition\n");
   ast->gen_toplevel();
 }
+void handle_global_asm() {
+  auto ast = parse_global_asm();
+  debug_log("Parsed global assembly");
+  ast->gen_toplevel();
+}
+
 void handle_global_include() {
   std::string file_name = parse_include();
   debug_log("Parsed an include (" << file_name << ")");
@@ -74,6 +80,9 @@ void main_loop() {
       break;
     case T_TYPE:
       handle_global_type();
+      break;
+    case T_ASM:
+      handle_global_asm();
       break;
     default:
       error("Unexpected token '" + token_to_str(curr_token) + "' at top-level");

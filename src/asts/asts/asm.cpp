@@ -43,3 +43,8 @@ Value *ASMExprAST::gen_value() {
   return new ConstValue(
       type, has_output ? call : LLVMConstNull(NullType().llvm_type()));
 }
+
+GlobalASMExprAST::GlobalASMExprAST(std::string asm_str) : asm_str(asm_str) {}
+void GlobalASMExprAST::gen_toplevel() {
+  LLVMAppendModuleInlineAsm(curr_module, asm_str.data(), asm_str.size());
+}
