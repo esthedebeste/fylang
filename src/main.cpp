@@ -3,42 +3,6 @@
 #include "utils.h"
 #include <cstring>
 
-void handle_definition() {
-  auto ast = parse_definition();
-  debug_log("Parsed a function definition (name: " << ast->name << ")");
-  ast->add();
-}
-
-void handle_declare() {
-  auto ast = parse_declare();
-  debug_log("Parsed a declare\n");
-  auto val = ast->gen_toplevel();
-  if (DEBUG && val)
-    LLVMDumpValue(val);
-}
-void handle_global_let() {
-  auto ast = parse_let_expr();
-  debug_log("Parsed a global variable\n");
-  auto val = ast->gen_toplevel();
-  if (DEBUG)
-    LLVMDumpValue(val);
-}
-void handle_global_struct() {
-  auto ast = parse_struct();
-  debug_log("Parsed a struct definition\n");
-  ast->gen_toplevel();
-}
-void handle_global_type() {
-  auto ast = parse_type_definition();
-  debug_log("Parsed a type definition\n");
-  ast->gen_toplevel();
-}
-void handle_global_asm() {
-  auto ast = parse_global_asm();
-  debug_log("Parsed global assembly");
-  ast->gen_toplevel();
-}
-
 void handle_global_include() {
   std::string file_name = parse_include();
   debug_log("Parsed an include (" << file_name << ")");
@@ -52,41 +16,84 @@ void handle_global_include() {
   eat(T_STRING);
 }
 
+void handle_toplevel();
+
+void handle_space() {
+  eat(T_SPACE);
+  auto id = identifier_string;
+  eat(T_IDENTIFIER);
+  eat('{');
+  push_space(id);
+  while (curr_token != '}')
+    handle_toplevel();
+  pop_space();
+  eat('}');
+}
+
+void handle_toplevel() {
+  switch (curr_token) {
+  case ';': // ignore top-level semicolons.
+    get_next_token();
+    break;
+  case T_SPACE:
+    handle_space();
+    break;
+  case T_FUNCTION:
+  case T_INLINE: {
+    auto ast = parse_definition();
+    debug_log("Parsed a function definition (name: " << ast->name << ")");
+    ast->add();
+    break;
+  }
+  case T_DECLARE: {
+    auto ast = parse_declare();
+    debug_log("Parsed a declare\n");
+    auto val = ast->gen_toplevel();
+    if (DEBUG && val)
+      LLVMDumpValue(val);
+    break;
+  }
+  case T_CONST:
+  case T_LET: {
+    auto ast = parse_let_expr();
+    debug_log("Parsed a global variable\n");
+    auto val = ast->gen_toplevel();
+    if (DEBUG)
+      LLVMDumpValue(val);
+    break;
+  }
+  case T_STRUCT: {
+    auto ast = parse_struct();
+    debug_log("Parsed a struct definition\n");
+    ast->gen_toplevel();
+    break;
+  }
+  case T_INCLUDE:
+    handle_global_include();
+    break;
+  case T_TYPE: {
+    auto ast = parse_type_definition();
+    debug_log("Parsed a type definition\n");
+    ast->gen_toplevel();
+    break;
+  }
+  case T_ASM: {
+    auto ast = parse_global_asm();
+    debug_log("Parsed global assembly");
+    ast->gen_toplevel();
+    break;
+  }
+  default:
+    error("Unexpected token '" + token_to_str(curr_token) + "' at top-level");
+  }
+}
+
 void main_loop() {
   get_next_token();
   while (1) {
-    switch (curr_token) {
-    case T_EOF:
-      return;
-    case ';': // ignore top-level semicolons.
-      get_next_token();
+    if (curr_token == T_EOF)
       break;
-    case T_FUNCTION:
-    case T_INLINE:
-      handle_definition();
-      break;
-    case T_DECLARE:
-      handle_declare();
-      break;
-    case T_CONST:
-    case T_LET:
-      handle_global_let();
-      break;
-    case T_STRUCT:
-      handle_global_struct();
-      break;
-    case T_INCLUDE:
-      handle_global_include();
-      break;
-    case T_TYPE:
-      handle_global_type();
-      break;
-    case T_ASM:
-      handle_global_asm();
-      break;
-    default:
-      error("Unexpected token '" + token_to_str(curr_token) + "' at top-level");
-    }
+    handle_toplevel();
   }
 }
 
@@ -145,16 +152,14 @@ int main(int argc, char **argv, char **envp) {
   add_file_to_queue(".", input);
   // parse and compile everything into LLVM IR
   main_loop();
+  auto main_func = curr_scope->get_function("main");
   LLVMValueRef main_function =
-      curr_named_functions.count("main")
-          ? curr_named_functions["main"]->gen_ptr()->gen_val()
-          : nullptr;
+      main_func ? main_func->gen_ptr()->gen_val() : nullptr;
   std::vector<LLVMValueRef> entry_functions;
   if (main_function)
     entry_functions.push_back(main_function);
-  for (auto &[_, func] : curr_named_functions)
-    if (func->flags.always_compile)
-      entry_functions.push_back(func->gen_ptr()->gen_val());
+  for (auto func : always_compile_functions)
+    entry_functions.push_back(func->gen_ptr()->gen_val());
   if (!getenv("NO_UCR") && entry_functions.size() > 0)
     remove_unused_globals(curr_module, entry_functions);
   if (main_function)

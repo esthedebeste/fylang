@@ -18,10 +18,19 @@ const char *next_unnamed();
 // Unnamed symbol
 #define UN next_unnamed()
 
+consteval const char *__file_name__(const char *path) {
+  const char *last = path;
+  while (*path)
+    if (*path++ == '/')
+      last = path;
+  return last;
+}
+
 #define error(err) (std::cerr << "Error: " << err << std::endl), exit(1)
 #define debug_log(format)                                                      \
   if (DEBUG)                                                                   \
-  std::cerr << "[" << __FILE__ << ":" << __LINE__ << "] " << format << std::endl
+  std::cerr << "[" << __file_name__(__FILE__) << ":" << __LINE__ << "] "       \
+            << format << std::endl
 
 LLVMCallConv get_call_conv(std::string name);
 

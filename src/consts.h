@@ -66,6 +66,8 @@ enum Token : const int {
   T_AND,           // and
   T_CONTINUE,      // continue
   T_BREAK,         // break
+  T_SPACE,         // space
+  T_DOUBLE_COLON,  // ::
 };
 
 extern LLVMContextRef curr_ctx;

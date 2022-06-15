@@ -308,8 +308,17 @@ ExprAST *parse_paren_expr() {
 /// identifierexpr
 ///   ::= identifier
 ExprAST *parse_identifier_expr() {
-  std::string id = identifier_string;
+  std::vector<std::string> spaces;
+  spaces.push_back(identifier_string);
   eat(T_IDENTIFIER);
+  while (curr_token == T_DOUBLE_COLON) {
+    eat(T_DOUBLE_COLON);
+    spaces.push_back(identifier_string);
+    eat(T_IDENTIFIER);
+  }
+  std::string last = spaces.back();
+  spaces.pop_back();
+  Identifier id(spaces, last);
   if (curr_token == '(') {
     std::vector<ExprAST *> args = parse_call();
     return new NameCallExprAST(id, args);

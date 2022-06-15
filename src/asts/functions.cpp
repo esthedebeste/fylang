@@ -15,14 +15,17 @@ class MethodAST;
 class FunctionAST;
 std::unordered_map<std::string, std::vector<MethodAST *>>
     curr_extension_methods;
-std::unordered_map<std::string, FunctionAST *> curr_named_functions;
+std::vector<FunctionAST *> always_compile_functions;
 
 FuncFlags flags;
 FunctionAST::FunctionAST(std::string name,
                          std::vector<std::pair<std::string, TypeAST *>> args,
                          FuncFlags flags, TypeAST *return_type, ExprAST *body)
     : name(name), args(args), flags(flags), body(body),
-      ft(return_type, seconds(args), flags) {}
+      ft(return_type, seconds(args), flags), base_scope(curr_scope) {
+  if (flags.always_compile)
+    always_compile_functions.push_back(this);
+}
 std::string FunctionAST::get_name(FunctionType *type) {
   if (!ft.is_generic())
     return name;
@@ -41,7 +44,7 @@ std::string FunctionAST::get_name(FunctionType *type) {
   return str.str();
 }
 FuncValue *FunctionAST::declare(FunctionType *type) {
-  std::string name = get_name(type);
+  std::string name = curr_scope->get_prefix() + get_name(type);
   if (already_declared.count(type))
     return already_declared[type];
   if (auto func = LLVMGetNamedFunction(curr_module, name.c_str()))
@@ -51,16 +54,21 @@ FuncValue *FunctionAST::declare(FunctionType *type) {
   LLVMSetFunctionCallConv(func, flags.call_conv);
   return already_declared[type] = new FuncValue(type, func);
 }
-FunctionType *FunctionAST::get_type() {
-  push_scope();
-  for (auto &[name, type] : this->args)
+static FunctionType *get_func_type(FunctionAST *func) {
+  for (auto &[name, type] : func->args)
     curr_scope->declare_variable(name, type->type());
-  FunctionType *type = ft.func_type();
-  if (!type->return_type && body)
-    type->return_type = body->get_type();
+  FunctionType *type = func->ft.func_type();
+  if (!type->return_type && func->body)
+    type->return_type = func->body->get_type();
   if (!type->return_type)
-    error("can't infer return type of function " + name);
-  pop_scope();
+    error("can't infer return type of function " + func->name);
+  return type;
+}
+FunctionType *FunctionAST::get_type() {
+  Scope *prev_scope = curr_scope;
+  curr_scope = new Scope(base_scope);
+  auto type = get_func_type(this);
+  curr_scope = prev_scope;
   return type;
 }
 FunctionType *FunctionAST::get_type(std::vector<ExprAST *> args) {
@@ -69,31 +77,42 @@ FunctionType *FunctionAST::get_type(std::vector<ExprAST *> args) {
     error("wrong number of arguments to function "
           << name << " (expected " << this->args.size() << ", got "
           << args.size() << ")");
+  std::vector<Type *> arg_types;
+  for (auto arg : args)
+    arg_types.push_back(arg->get_type());
+  Scope *prev_scope = curr_scope;
+  curr_scope = new Scope(base_scope);
   for (size_t i = 0; i < args.size(); ++i) {
-    Type *arg_type = args[i]->get_type();
-    if (i < this->args.size() && !this->args[i].second->castable_from(arg_type))
+    if (i < this->args.size() &&
+        !this->args[i].second->castable_from(arg_types[i]))
       error("argument " + std::to_string(i) + " to function " + name +
-            " has wrong type, got: " + arg_type->stringify() +
+            " has wrong type, got: " + arg_types[i]->stringify() +
             ", expected: " + this->args[i].second->stringify());
   }
-  return get_type();
+  auto type = get_func_type(this);
+  curr_scope = prev_scope;
+  return type;
 }
 // Returns PHI of return value, moves to return block
 LLVMValueRef FunctionAST::gen_body(LLVMValueRef *args, FunctionType *type) {
-  for (size_t i = 0; i < this->args.size(); i++)
+  for (size_t i = 0; i < this->args.size(); i++) {
     curr_scope->set_variable(this->args[i].first,
                              new ConstValue(type->arguments[i], args[i]));
+    LLVMSetValueName2(args[i], this->args[i].first.c_str(),
+                      this->args[i].first.length());
+  }
   ReturnState prev_return_state = curr_return_state;
   LLVMBasicBlockRef body_bb = LLVMGetInsertBlock(curr_builder);
-  LLVMBasicBlockRef ret_bb =
-      LLVMAppendBasicBlock(LLVMGetBasicBlockParent(body_bb), UN);
+  LLVMBasicBlockRef ret_bb = LLVMAppendBasicBlock(
+      LLVMGetBasicBlockParent(body_bb), ("return_" + name).c_str());
   LLVMPositionBuilderAtEnd(curr_builder, ret_bb);
   LLVMValueRef ret_phi =
-      LLVMBuildPhi(curr_builder, type->return_type->llvm_type(), UN);
+      LLVMBuildPhi(curr_builder, type->return_type->llvm_type(), "retval");
   LLVMPositionBuilderAtEnd(curr_builder, body_bb);
   curr_return_state = {type->return_type, ret_bb, ret_phi};
   Value *body_val = body->gen_value();
   add_return(body_val);
+  LLVMMoveBasicBlockAfter(ret_bb, LLVMGetInsertBlock(curr_builder));
   LLVMPositionBuilderAtEnd(curr_builder, ret_bb);
   curr_return_state = prev_return_state;
   return ret_phi;
@@ -112,7 +131,7 @@ ConstValue *FunctionAST::gen_call(std::vector<Value *> arg_vals) {
           << name << " (expected " << this->args.size() << ", got "
           << arg_vals.size() << ")");
   Scope *prev_scope = curr_scope;
-  curr_scope = new Scope(global_scope);
+  curr_scope = new Scope(base_scope);
   for (size_t i = 0; i < arg_vals.size(); ++i) {
     Type *arg_type = arg_vals[i]->get_type();
     if (i < this->args.size()) {
@@ -171,7 +190,7 @@ ConstValue *FunctionAST::gen_call(std::vector<Value *> arg_vals) {
 
 FuncValue *FunctionAST::gen_ptr() {
   Scope *prev_scope = curr_scope;
-  curr_scope = new Scope(global_scope);
+  curr_scope = new Scope(base_scope);
   for (auto &[name, type] : this->args)
     curr_scope->declare_variable(name, type->type());
 
@@ -210,11 +229,11 @@ FuncValue *FunctionAST::gen_ptr() {
   return declaration;
 }
 
-void FunctionAST::add() { curr_named_functions[name] = this; }
+void FunctionAST::add() { curr_scope->set_function(name, this); }
 
 auto add_this_type(std::vector<std::pair<std::string, TypeAST *>> args,
                    TypeAST *type) {
-  args.push_back(std::make_pair("this", type));
+  args.insert(args.begin(), std::make_pair("this", type));
   return args;
 }
 
@@ -229,11 +248,11 @@ std::string MethodAST::get_name(FunctionType *type) {
 }
 FunctionType *MethodAST::get_type(std::vector<ExprAST *> args,
                                   ExprAST *this_arg) {
-  args.push_back(this_arg);
+  args.insert(args.begin(), this_arg);
   return FunctionAST::get_type(args);
 }
 Value *MethodAST::gen_call(std::vector<ExprAST *> args, ExprAST *this_arg) {
-  args.push_back(this_arg);
+  args.insert(args.begin(), this_arg);
   return FunctionAST::gen_call(args);
 }
 

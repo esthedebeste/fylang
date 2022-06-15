@@ -1,8 +1,6 @@
 #include "types.h"
 #include "asts.h"
 
-std::unordered_map<std::string, Type *> curr_named_types;
-
 TypeAST::~TypeAST() {}
 LLVMTypeRef TypeAST::llvm_type() { return type()->llvm_type(); }
 TypeType TypeAST::type_type() { return type()->type_type(); }
@@ -22,11 +20,19 @@ Type *Generic::generate(std::vector<Type *> args) {
   if (args.size() != params.size())
     error("wrong number of arguments to generic type");
   for (size_t i = 0; i < params.size(); i++)
-    curr_named_types[params[i]] = args[i];
+    curr_scope->set_type(params[i], args[i]);
   Type *type = ast->type();
   return type;
 }
-std::unordered_map<std::string, Generic *> curr_named_generics;
+
+static std::unordered_set<std::string> curr_generic_args;
+bool Generic::match(Type *type, uint *g) {
+  for (auto param : params)
+    curr_generic_args.insert(param);
+  auto res = ast->match(type, g);
+  curr_generic_args.clear();
+  return res;
+}
 
 AbsoluteTypeAST::AbsoluteTypeAST(Type *typ) : typ(typ) {}
 Type *AbsoluteTypeAST::type() { return typ; }
@@ -162,7 +168,7 @@ GenericArrayTypeAST::GenericArrayTypeAST(TypeAST *elem, std::string count_name)
     : elem(elem), count_name(count_name) {}
 Type *GenericArrayTypeAST::type() {
   IntValue *count =
-      dynamic_cast<IntValue *>(curr_scope->get_named_variable(count_name));
+      dynamic_cast<IntValue *>(curr_scope->get_variable(count_name));
   if (count == nullptr)
     error("Generic array not initialized properly, " << count_name
                                                      << " is undefined.");
@@ -278,34 +284,48 @@ bool TupleTypeAST::is_generic() {
 
 NamedTypeAST::NamedTypeAST(std::string name) : name(name) {}
 Type *NamedTypeAST::type() {
-  if (!curr_named_types.count(name))
+  if (auto type = curr_scope->get_type(name))
+    return type;
+  else
     error("undefined type: " + name);
-  return curr_named_types[name];
 }
 bool NamedTypeAST::eq(TypeAST *other) {
   NamedTypeAST *n = dynamic_cast<NamedTypeAST *>(other);
   return n && n->name == name;
 }
-bool NamedTypeAST::match(Type *type, uint *g) { return this->type()->eq(type); }
+bool NamedTypeAST::match(Type *type, uint *g) {
+  if (curr_generic_args.contains(name)) {
+    curr_scope->set_type(name, type);
+    if (g)
+      (*g) += 1;
+    return true;
+  }
+
+  return this->type()->eq(type);
+}
 bool NamedTypeAST::is_generic() { return false; }
 
 GenericAccessAST::GenericAccessAST(std::string name,
                                    std::vector<TypeAST *> params)
     : name(name), params(params) {}
 Type *GenericAccessAST::type() {
-  if (!curr_named_generics.count(name))
+  auto generic = get_generic(name);
+  if (!generic)
     error("undefined generic type: " + name);
   std::vector<Type *> args(params.size());
   for (size_t i = 0; i < params.size(); i++)
     args[i] = params[i]->type();
-  return curr_named_generics[name]->generate(args);
+  return generic->generate(args);
 }
 bool GenericAccessAST::eq(TypeAST *other) {
   NamedTypeAST *n = dynamic_cast<NamedTypeAST *>(other);
   return n && n->name == name;
 }
 bool GenericAccessAST::match(Type *type, uint *g) {
-  return this->type()->eq(type);
+  if (auto generic = get_generic(name))
+    return generic->match(type, g);
+  else
+    error("undefined generic type: " + name);
 }
 bool GenericAccessAST::is_generic() { return false; }
 std::string GenericAccessAST::stringify() {
@@ -371,13 +391,13 @@ std::string UnionTypeAST::stringify() {
 }
 
 GenericTypeAST::GenericTypeAST(std::string name) : name(name) {}
-Type *GenericTypeAST::type() { return curr_named_types[name]; }
+Type *GenericTypeAST::type() { return curr_scope->get_type(name); }
 bool GenericTypeAST::eq(TypeAST *other) {
   GenericTypeAST *g = dynamic_cast<GenericTypeAST *>(other);
   return g && name == g->name;
 }
 bool GenericTypeAST::match(Type *type, uint *generic_count) {
-  curr_named_types[name] = type;
+  curr_scope->set_type(name, type);
   if (generic_count)
     (*generic_count) += 1;
   return true;

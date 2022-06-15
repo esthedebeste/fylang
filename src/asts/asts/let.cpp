@@ -18,7 +18,8 @@ Type *LetExprAST::get_type() {
 }
 LLVMValueRef LetExprAST::gen_toplevel() {
   Type *type = get_type();
-  LLVMValueRef ptr = LLVMAddGlobal(curr_module, type->llvm_type(), id.c_str());
+  std::string name = curr_scope->get_prefix() + id;
+  auto ptr = LLVMAddGlobal(curr_module, type->llvm_type(), name.c_str());
   Value *var_value = new BasicLoadValue(type, ptr);
   LLVMSetInitializer(ptr, LLVMConstNull(type->llvm_type()));
   if (value) {

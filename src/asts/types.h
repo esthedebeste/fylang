@@ -2,7 +2,6 @@
 #include "../types.h"
 #include "../utils.h"
 
-extern std::unordered_map<std::string, Type *> curr_named_types;
 class TypeAST {
 public:
   virtual ~TypeAST();
@@ -24,8 +23,8 @@ struct Generic {
   TypeAST *ast;
   Generic(std::vector<std::string> params, TypeAST *ast);
   Type *generate(std::vector<Type *> args);
+  bool match(Type *type, uint *g);
 };
-extern std::unordered_map<std::string, Generic *> curr_named_generics;
 
 class AbsoluteTypeAST : public TypeAST {
 public:

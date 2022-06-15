@@ -44,17 +44,17 @@ Value *ValueCallExprAST::gen_value() {
   return new ConstValue(func_t->return_type, call);
 }
 
-NameCallExprAST::NameCallExprAST(std::string name, std::vector<ExprAST *> args)
+NameCallExprAST::NameCallExprAST(Identifier name, std::vector<ExprAST *> args)
     : name(name), args(args) {}
 Type *NameCallExprAST::get_type() {
-  if (curr_named_functions.count(name))
-    return curr_named_functions[name]->get_type(args)->return_type;
+  if (auto function = get_function(name))
+    return function->get_type(args)->return_type;
   else
     return ValueCallExprAST(new VariableExprAST(name), args).get_type();
 }
 Value *NameCallExprAST::gen_value() {
-  if (curr_named_functions.count(name))
-    return curr_named_functions[name]->gen_call(args);
+  if (auto function = get_function(name))
+    return function->gen_call(args);
   else
     return ValueCallExprAST(new VariableExprAST(name), args).gen_value();
 }

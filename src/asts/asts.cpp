@@ -1,12 +1,32 @@
 #include "asts.h"
 
 Value *build_malloc(Type *type) {
-  if (!curr_named_functions.count("malloc"))
+  if (auto func = get_function(std::string("malloc")))
+    return func->gen_call({SizeofExprAST(type_ast(type)).gen_value()})
+        ->cast_to(type->ptr());
+  else
     error("malloc not defined before using 'new', maybe add 'include "
           "\"c/stdlib\"'?");
-  return curr_named_functions["malloc"]
-      ->gen_call({SizeofExprAST(type_ast(type)).gen_value()})
-      ->cast_to(type->ptr());
+}
+
+Identifier::Identifier(std::vector<std::string> spaces, std::string name)
+    : spaces(spaces), name(name) {}
+Identifier::Identifier(std::string name) : name(name) {}
+bool Identifier::has_spaces() { return spaces.size() > 0; }
+bool operator==(const Identifier &lhs, const Identifier &rhs) {
+  if (lhs.spaces.size() != rhs.spaces.size())
+    return false;
+  for (size_t i = 0; i < lhs.spaces.size(); i++)
+    if (lhs.spaces[i] != rhs.spaces[i])
+      return false;
+  return lhs.name == rhs.name;
+}
+std::string Identifier::to_str() {
+  std::string res;
+  for (auto c : spaces)
+    res += c + "::";
+  res += name;
+  return res;
 }
 
 ExprAST::~ExprAST() {}
@@ -89,9 +109,7 @@ bool NullExprAST::is_constant() { return true; }
 DeclareExprAST::DeclareExprAST(LetExprAST *let) : let(let) {
   curr_scope->declare_variable(let->id, let->get_type());
 }
-DeclareExprAST::DeclareExprAST(FunctionAST *func) : func(func) {
-  curr_named_functions[func->name] = func;
-}
+DeclareExprAST::DeclareExprAST(FunctionAST *func) : func(func) { func->add(); }
 LLVMValueRef DeclareExprAST::gen_toplevel() {
   if (let)
     return let->gen_declare();

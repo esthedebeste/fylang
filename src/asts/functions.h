@@ -17,11 +17,13 @@ class MethodAST;
 class FunctionAST;
 extern std::unordered_map<std::string, std::vector<MethodAST *>>
     curr_extension_methods;
-extern std::unordered_map<std::string, FunctionAST *> curr_named_functions;
+extern std::vector<FunctionAST *> always_compile_functions;
 
 class ExprAST;
+class Scope;
 class FunctionAST {
 public:
+  Scope *base_scope;
   std::string name;
   std::vector<std::pair<std::string, TypeAST *>> args;
   ExprAST *body;

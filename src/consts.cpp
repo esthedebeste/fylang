@@ -83,6 +83,8 @@ std::unordered_map<Token, std::string> token_strs = {
     {T_AND, "and"},
     {T_CONTINUE, "continue"},
     {T_BREAK, "break"},
+    {T_SPACE, "space"},
+    {T_DOUBLE_COLON, "::"},
 };
 
 std::unordered_map<std::string, Token> keywords = {
@@ -118,6 +120,7 @@ std::unordered_map<std::string, Token> keywords = {
     {"and", T_AND},
     {"continue", T_CONTINUE},
     {"break", T_BREAK},
+    {"space", T_SPACE},
 };
 
 std::unordered_set<int> unaries = {'!', '~', '*', '&', '+', '-', T_RETURN};

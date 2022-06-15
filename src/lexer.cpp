@@ -203,6 +203,7 @@ int next_token() {
       eq_case('&', T_LAND);
       eq_case('<', T_LSHIFT);
       eq_case('>', T_RSHIFT);
+      eq_case(':', T_DOUBLE_COLON);
     }
 #undef eq_case
   if (curr_char == '/') {
