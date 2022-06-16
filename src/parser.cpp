@@ -17,6 +17,23 @@ std::string eat_string() {
   }
   return ret;
 }
+Identifier parse_identifier(std::string first = "") {
+  std::vector<std::string> spaces;
+  if (first == "") {
+    spaces.push_back(identifier_string);
+    eat(T_IDENTIFIER);
+  } else
+    spaces.push_back(first);
+
+  while (curr_token == T_DOUBLE_COLON) {
+    eat(T_DOUBLE_COLON);
+    spaces.push_back(identifier_string);
+    eat(T_IDENTIFIER);
+  }
+  std::string last = spaces.back();
+  spaces.pop_back();
+  return Identifier(spaces, last);
+}
 
 std::tuple<std::string, TypeAST *, FuncFlags>
 parse_prototype_begin(bool parse_name, bool parse_this);
@@ -89,7 +106,7 @@ TypeAST *parse_num_type() {
     eat('>');
     return new GenericAccessAST(id, args);
   } else
-    return new NamedTypeAST(id);
+    return new NamedTypeAST(parse_identifier(id));
 }
 
 TypeDefAST *parse_type_definition() {
@@ -141,8 +158,9 @@ TypeAST *parse_tuple_type() {
   while (curr_token != '}') {
     auto type = parse_type();
     if (curr_token == ':') {
-      if (auto named = dynamic_cast<NamedTypeAST *>(type))
-        return parse_inline_struct_type(named->name);
+      auto named = dynamic_cast<NamedTypeAST *>(type);
+      if (named && !named->name.has_spaces())
+        return parse_inline_struct_type(named->name.name);
       else
         error("Unexpected : in tuple type");
     }
@@ -308,17 +326,7 @@ ExprAST *parse_paren_expr() {
 /// identifierexpr
 ///   ::= identifier
 ExprAST *parse_identifier_expr() {
-  std::vector<std::string> spaces;
-  spaces.push_back(identifier_string);
-  eat(T_IDENTIFIER);
-  while (curr_token == T_DOUBLE_COLON) {
-    eat(T_DOUBLE_COLON);
-    spaces.push_back(identifier_string);
-    eat(T_IDENTIFIER);
-  }
-  std::string last = spaces.back();
-  spaces.pop_back();
-  Identifier id(spaces, last);
+  auto id = parse_identifier();
   if (curr_token == '(') {
     std::vector<ExprAST *> args = parse_call();
     return new NameCallExprAST(id, args);

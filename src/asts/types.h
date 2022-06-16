@@ -114,10 +114,11 @@ public:
   bool is_generic();
 };
 
+#include "scope.h"
 class NamedTypeAST : public TypeAST {
 public:
-  std::string name;
-  NamedTypeAST(std::string name);
+  Identifier name;
+  NamedTypeAST(Identifier name);
   Type *type();
   bool eq(TypeAST *other);
   bool match(Type *type, uint *g);

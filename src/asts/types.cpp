@@ -282,20 +282,20 @@ bool TupleTypeAST::is_generic() {
   return false;
 }
 
-NamedTypeAST::NamedTypeAST(std::string name) : name(name) {}
+NamedTypeAST::NamedTypeAST(Identifier name) : name(name) {}
 Type *NamedTypeAST::type() {
-  if (auto type = curr_scope->get_type(name))
+  if (auto type = get_type(name))
     return type;
   else
-    error("undefined type: " + name);
+    error("undefined type: " + name.to_str());
 }
 bool NamedTypeAST::eq(TypeAST *other) {
   NamedTypeAST *n = dynamic_cast<NamedTypeAST *>(other);
   return n && n->name == name;
 }
 bool NamedTypeAST::match(Type *type, uint *g) {
-  if (curr_generic_args.contains(name)) {
-    curr_scope->set_type(name, type);
+  if (!name.has_spaces() && curr_generic_args.contains(name.name)) {
+    curr_scope->set_type(name.name, type);
     if (g)
       (*g) += 1;
     return true;

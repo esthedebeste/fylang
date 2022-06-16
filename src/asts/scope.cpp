@@ -1,4 +1,6 @@
-#include "../asts.h"
+#include "scope.h"
+#include "../values.h"
+#include "functions.h"
 
 Scope::Scope(Scope *parent_scope, std::string name)
     : parent_scope(parent_scope), name(name) {}
