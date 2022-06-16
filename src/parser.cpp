@@ -323,6 +323,19 @@ ExprAST *parse_paren_expr() {
   return expr;
 }
 
+ArrayExprAST *parse_array_expr() {
+  eat('[');
+  std::vector<ExprAST *> elements;
+  while (curr_token != ']') {
+    elements.push_back(parse_expr());
+    if (curr_token == ']')
+      break;
+    eat(',');
+  }
+  eat(']');
+  return new ArrayExprAST(elements);
+}
+
 /// identifierexpr
 ///   ::= identifier
 ExprAST *parse_identifier_expr() {
@@ -614,6 +627,8 @@ ExprAST *parse_primary() {
     return parse_asm_expr();
   case '{':
     return parse_block();
+  case '[':
+    return parse_array_expr();
   }
 }
 int get_token_precedence() {

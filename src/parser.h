@@ -36,6 +36,7 @@ WhileExprAST *parse_while_expr();
 ForExprAST *parse_for_expr();
 ExprAST *parse_new_expr();
 BlockExprAST *parse_block();
+ArrayExprAST *parse_array_expr();
 LetExprAST *parse_let_expr();
 SizeofExprAST *parse_sizeof_expr();
 BoolExprAST *parse_bool_expr();

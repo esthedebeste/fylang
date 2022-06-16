@@ -260,6 +260,15 @@ public:
   Value *gen_value();
 };
 
+/// ArrayExprAST - Expression class for an array of values.
+class ArrayExprAST : public ExprAST {
+public:
+  std::vector<ExprAST *> elements;
+  ArrayExprAST(std::vector<ExprAST *> elements);
+  Type *get_type();
+  Value *gen_value();
+};
+
 /// IndexExprAST - Expression class for accessing indexes (a[0]).
 class IndexExprAST : public ExprAST {
   ExprAST *value;
