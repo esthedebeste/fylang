@@ -160,15 +160,18 @@ LLVMValueRef cast(Value *source, Type *to) {
   if (src->eq(to))
     return LLVMBuildBitCast(curr_builder, source->gen_val(), to->llvm_type(),
                             UN);
-  if (NumType *num = dynamic_cast<NumType *>(src))
+  if (NumType *num = dynamic_cast<NumType *>(src)) {
+    if (IntValue *int_val = dynamic_cast<IntValue *>(source))
+      if (NumType *to_num = dynamic_cast<NumType *>(to))
+        return IntValue(*to_num, int_val->val).gen_val();
     return gen_num_cast(source->gen_val(), num, to);
-  if (PointerType *ptr = dynamic_cast<PointerType *>(src))
+  } else if (PointerType *ptr = dynamic_cast<PointerType *>(src))
     return gen_ptr_cast(source->gen_val(), ptr, to);
-  if (ArrayType *arr = dynamic_cast<ArrayType *>(src))
+  else if (ArrayType *arr = dynamic_cast<ArrayType *>(src))
     return gen_arr_cast(source, arr, to);
-  if (TupleType *tup = dynamic_cast<TupleType *>(src))
+  else if (TupleType *tup = dynamic_cast<TupleType *>(src))
     return gen_tuple_cast(source, tup, to);
-  if (src->type_type() == TypeType::Null)
+  else if (src->type_type() == TypeType::Null)
     return LLVMConstNull(to->llvm_type());
   error("Invalid cast from " + src->stringify() + " to " + to->stringify());
 }
