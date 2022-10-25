@@ -1,4 +1,4 @@
-#include "../asts.h"
+#include "typedef.h"
 
 TypeDefAST::~TypeDefAST() {}
 

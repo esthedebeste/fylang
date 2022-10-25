@@ -1,4 +1,5 @@
-#include "../asts.h"
+#include "unary.h"
+#include "binop.h"
 
 UnaryExprAST::UnaryExprAST(int op, ExprAST *operand)
     : op(op), operand(operand) {}
@@ -19,14 +20,18 @@ Value *UnaryExprAST::gen_value() {
   switch (op) {
   case '!':
     // shortcut for == 0
-    if (NumType *num_type = dynamic_cast<NumType *>(val->get_type()))
+    if (auto num_type = dynamic_cast<NumType *>(val->get_type()))
       return new ConstValue(
           new NumType(1, false, false),
           gen_num_num_binop(T_EQEQ, val->gen_val(),
                             LLVMConstNull(val->get_type()->llvm_type()),
                             num_type, num_type));
-    else
-      error("'!' unary op can only be used on numbers");
+    else if (auto ptr_type = dynamic_cast<PointerType *>(val->get_type()))
+      return new ConstValue(
+          new NumType(1, false, false),
+          LLVMBuildICmp(curr_builder, LLVMIntEQ, val->gen_val(),
+                        LLVMConstNull(val->get_type()->llvm_type()), UN));
+    error("'!' unary op can only be used on numbers");
   case '-':
     // shortcut for 0 - num
     if (NumType *num_type = dynamic_cast<NumType *>(val->get_type()))
@@ -46,13 +51,17 @@ Value *UnaryExprAST::gen_value() {
     return new BasicLoadValue(type, val->gen_val());
   case '&':
     return new ConstValue(type, val->gen_ptr());
-  case T_RETURN:
-    add_return(val->gen_val());
+  case T_RETURN: {
+    // from functions.h
+    void add_return(Value * ret_val, LLVMBasicBlockRef curr_block);
+
+    auto curr_block = LLVMGetInsertBlock(curr_builder);
+    add_return(val, curr_block);
     LLVMPositionBuilderAtEnd(
         curr_builder,
-        LLVMAppendBasicBlock(
-            LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder)), UN));
+        LLVMAppendBasicBlock(LLVMGetBasicBlockParent(curr_block), UN));
     return val;
+  }
   default:
     error("invalid prefix unary operator '" + token_to_str(op) + "'");
   }

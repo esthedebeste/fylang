@@ -167,8 +167,7 @@ bool ArrayTypeAST::is_generic() { return elem->is_generic(); }
 GenericArrayTypeAST::GenericArrayTypeAST(TypeAST *elem, std::string count_name)
     : elem(elem), count_name(count_name) {}
 Type *GenericArrayTypeAST::type() {
-  IntValue *count =
-      dynamic_cast<IntValue *>(curr_scope->get_variable(count_name));
+  auto count = dynamic_cast<IntValue *>(curr_scope->get_variable(count_name));
   if (count == nullptr)
     error("Generic array not initialized properly, " << count_name
                                                      << " is undefined.");
@@ -240,9 +239,14 @@ NamedStructTypeAST::NamedStructTypeAST(
     std::string name, std::vector<std::pair<std::string, TypeAST *>> members)
     : name(name), StructTypeAST(members) {}
 Type *NamedStructTypeAST::type() {
+  push_scope();
+  auto opaque = new NamedOpaqueType(name);
+  curr_scope->set_type(name, opaque);
+  opaque->llvm_type();
   std::vector<std::pair<std::string, Type *>> types;
   for (auto &m : members)
     types.push_back(std::make_pair(m.first, m.second->type()));
+  pop_scope();
   return new NamedStructType(name, types);
 }
 

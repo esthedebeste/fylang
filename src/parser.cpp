@@ -88,7 +88,9 @@ NumType *numtype(std::string prefix, std::string value, bool is_float,
 TypeAST *parse_num_type() {
   std::string id = identifier_string;
   eat(T_IDENTIFIER);
-  if (NumType *num = numtype("uint", id, false, false))
+  if (id == "null")
+    return type_ast(new NullType());
+  else if (NumType *num = numtype("uint", id, false, false))
     return type_ast(num);
   else if (NumType *num = numtype("int", id, false, true))
     return type_ast(num);
@@ -266,37 +268,54 @@ CharExprAST *parse_char_expr() {
   eat(T_CHAR);
   return result;
 }
+
+#include "asts/asts/string.h"
+template <typename To>
+ExprAST *convert_string(std::string str, StringType type) {
+  std::basic_string<To> converted_str =
+      std::wstring_convert<
+          deletable_facet<std::codecvt<To, char, std::mbstate_t>>, To>{}
+          .from_bytes(str);
+  if (type == C_STRING)
+    return new PtrStringExprAST<To>(converted_str, true);
+  if (type == PTR_CHAR_ARRAY)
+    return new PtrStringExprAST<To>(converted_str, false);
+  else
+    return new StringExprAST<To>(converted_str);
+}
+
 ExprAST *parse_string_expr() {
   auto type = string_type;
   std::string str = eat_string();
-  // macro converts `str` to a string with elements `type` (UTF8 => UTF16)
-#define retstr(type)                                                           \
-  {                                                                            \
-    std::basic_string<type> converted_str =                                    \
-        std::wstring_convert<                                                  \
-            deletable_facet<std::codecvt<type, char, std::mbstate_t>>, type>{} \
-            .from_bytes(str);                                                  \
-    if (string_type == C_STRING)                                               \
-      return new PtrStringExprAST<type>(converted_str, true);                  \
-    if (string_type == PTR_CHAR_ARRAY)                                         \
-      return new PtrStringExprAST<type>(converted_str, false);                 \
-    else                                                                       \
-      return new StringExprAST<type>(converted_str);                           \
-  }
   if (curr_token == T_NUMBER) {
     auto num = std::stoi(num_value, nullptr, num_base);
     eat(T_NUMBER);
     switch (num) {
     case 8:
-      retstr(char);
+      return convert_string<char>(str, type);
     case 16:
-      retstr(char16_t);
+      return convert_string<char16_t>(str, type);
     default:
       error("Unknown string size: " << num);
     }
   } else
-    retstr(char);
-#undef retstr
+    return convert_string<char>(str, type);
+}
+#include "asts/asts/tuple.h"
+#include <vector>
+
+TupleExprAST *parse_tuple_expr() {
+  eat('(');
+  std::vector<ExprAST *> exprs;
+  while (curr_token != ')') {
+    auto expr = parse_expr();
+    exprs.push_back(expr);
+    if (curr_token == ')')
+      break;
+    eat(',');
+  }
+  eat(')');
+  return new TupleExprAST(exprs);
 }
 /// parenexpr ::= '(' expression ')'
 ExprAST *parse_paren_expr() {
@@ -336,6 +355,8 @@ ArrayExprAST *parse_array_expr() {
   return new ArrayExprAST(elements);
 }
 
+#include "asts/asts/call.h"
+#include "asts/asts/variable.h"
 /// identifierexpr
 ///   ::= identifier
 ExprAST *parse_identifier_expr() {
@@ -346,6 +367,9 @@ ExprAST *parse_identifier_expr() {
   }
   return new VariableExprAST(id);
 }
+
+#include "asts/asts/conditional.h"
+#include "asts/asts/type.h"
 /// ifexpr
 ///   ::= 'if' (expression) expression ('else' expression)?
 ///   ::= 'if' ('type' type == type) expression ('else' expression)?
@@ -416,16 +440,15 @@ ForExprAST *parse_for_expr() {
   }
   return new ForExprAST(init, cond, body, post, elze);
 }
+
+#include "asts/asts/new.h"
 /// newexpr ::= 'new|create' type '{' (identifier '=' expr ',')* '}'
 ExprAST *parse_new_expr() {
   bool is_new = curr_token == T_NEW;
   eat(is_new ? T_NEW : T_CREATE);
 
   if (is_new && curr_token == '(') {
-    // tuple on heap
-    TupleExprAST *tuple = dynamic_cast<TupleExprAST *>(parse_paren_expr());
-    if (tuple == nullptr)
-      error("new tuple not a tuple, add a comma to the end");
+    auto tuple = parse_tuple_expr();
     tuple->is_new = true;
     return tuple;
   }
@@ -545,7 +568,7 @@ std::vector<std::pair<std::string, ExprAST *>> parse_asm_expr_params() {
   return params;
 }
 // asmexpr ::= '__asm__' type '(' asm_str '=>' reg ')' '(' (reg '=' expr)* ')'
-ExprAST *parse_asm_expr() {
+ASMExprAST *parse_asm_expr() {
   eat(T_ASM);
   if (curr_token == '(') {
     // side effect asm
@@ -574,6 +597,8 @@ GlobalASMExprAST *parse_global_asm() {
   eat(')');
   return new GlobalASMExprAST(asm_str);
 }
+
+#include "asts/asts/null.h"
 /// primary
 ///   ::= identifierexpr
 ///   ::= numberexpr
@@ -654,6 +679,7 @@ std::vector<ExprAST *> parse_call() {
   eat(')');
   return args;
 }
+#include "asts/asts/index.h"
 ExprAST *parse_postfix() {
   ExprAST *prev = parse_primary();
   while (true)
@@ -691,15 +717,10 @@ ExprAST *parse_postfix() {
       prev = new IndexExprAST(prev, index);
       break;
     }
-    case T_AS: {
-      // cast
-      eat(T_AS);
-      TypeAST *cast_to = parse_type();
-      prev = new CastExprAST(prev, cast_to);
-      break;
-    }
     }
 }
+
+#include "asts/asts/unary.h"
 /// unary
 ///   ::= primary
 ///   ::= '!' unary
@@ -712,6 +733,28 @@ ExprAST *parse_unary() {
   ExprAST *operand = parse_unary();
   return new UnaryExprAST(opc, operand);
 }
+
+#include "asts/asts/cast.h"
+// parse low-priority postfix expressions
+ExprAST *parse_lp_postfix() {
+  ExprAST *prev = parse_unary();
+  while (true)
+    switch (curr_token) {
+    default:
+      return prev;
+    case T_AS: {
+      // cast
+      eat(T_AS);
+      TypeAST *cast_to = parse_type();
+      prev = new CastExprAST(prev, cast_to);
+      break;
+    }
+    }
+}
+
+#include "asts/asts/assign.h"
+#include "asts/asts/binop.h"
+#define parse_binop_side() parse_lp_postfix()
 /// binoprhs
 ///   ::= ('+' primary)*
 ExprAST *parse_bin_op_rhs(int expr_prec, ExprAST *LHS) {
@@ -729,7 +772,7 @@ ExprAST *parse_bin_op_rhs(int expr_prec, ExprAST *LHS) {
     int op = curr_token;
     eat(op);
     // Parse the primary expression after the binary operator.
-    auto RHS = parse_unary();
+    auto RHS = parse_binop_side();
 
     // If BinOp binds less tightly with RHS than the operator after RHS, let
     // the pending operator take RHS as its LHS.
@@ -751,10 +794,7 @@ ExprAST *parse_bin_op_rhs(int expr_prec, ExprAST *LHS) {
       LHS = new BinaryExprAST(op, LHS, RHS);
   }
 }
-ExprAST *parse_expr() {
-  ExprAST *LHS = parse_unary();
-  return parse_bin_op_rhs(0, LHS);
-}
+ExprAST *parse_expr() { return parse_bin_op_rhs(0, parse_binop_side()); }
 
 std::tuple<std::string, TypeAST *, FuncFlags>
 parse_prototype_begin(bool parse_name, bool parse_this) {
@@ -762,15 +802,28 @@ parse_prototype_begin(bool parse_name, bool parse_this) {
   flags.is_inline = curr_token == T_INLINE;
   if (flags.is_inline)
     eat(T_INLINE);
-  eat(T_FUNCTION);
+  eat(T_FUNCTION); // fun
   TypeAST *this_t = nullptr;
-  if (parse_this && curr_token == '(') {
+  if (parse_this && curr_token == '(') { // (*Thing)
     // type method
     eat('(');
     this_t = parse_type();
     eat(')');
   }
-  std::string fn_name = identifier_string;
+  if (curr_token == '[') {
+    // function flags/attrs
+    eat('[');
+    eat('[');
+    while (curr_token != ']') {
+      std::string type = identifier_string;
+      eat(T_IDENTIFIER);
+      if (!flags.set_flag(type))
+        error("Unknown flag type: " << type);
+    }
+    eat(']');
+    eat(']');
+  }
+  std::string fn_name = identifier_string; // do_stuff
   if (parse_name)
     eat(T_IDENTIFIER);
   while (curr_token != '(') {
@@ -838,8 +891,7 @@ FunctionAST *parse_prototype(TypeAST *default_return_type) {
 /// definition ::= 'fun' prototype expression
 FunctionAST *parse_definition() {
   FunctionAST *func = parse_prototype(nullptr /* assume from body */);
-  auto body = parse_expr();
-  func->body = body;
+  func->body = parse_expr();
   return func;
 }
 /// declare

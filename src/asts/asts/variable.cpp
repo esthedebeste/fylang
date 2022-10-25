@@ -1,4 +1,5 @@
-#include "../asts.h"
+#include "variable.h"
+#include "../functions.h"
 
 VariableExprAST::VariableExprAST(Identifier name) : name(name) {}
 Type *VariableExprAST::get_type() {

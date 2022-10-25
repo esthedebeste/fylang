@@ -2,20 +2,42 @@
 #include "../values.h"
 #include "functions.h"
 
+Identifier::Identifier(std::vector<std::string> spaces, std::string name)
+    : spaces(spaces), name(name) {}
+Identifier::Identifier(std::string name) : name(name) {}
+bool Identifier::has_spaces() { return spaces.size() > 0; }
+bool operator==(const Identifier &lhs, const Identifier &rhs) {
+  if (lhs.spaces.size() != rhs.spaces.size())
+    return false;
+  for (size_t i = 0; i < lhs.spaces.size(); i++)
+    if (lhs.spaces[i] != rhs.spaces[i])
+      return false;
+  return lhs.name == rhs.name;
+}
+std::string Identifier::to_str() {
+  std::string res;
+  for (auto c : spaces)
+    res += c + "::";
+  res += name;
+  return res;
+}
+
 Scope::Scope(Scope *parent_scope, std::string name)
     : parent_scope(parent_scope), name(name) {}
 
-static std::vector<std::string> full_path(Scope *curr) {
+static std::vector<std::string> full_path(Scope curr) {
   std::vector<std::string> ret;
-  while (curr) {
-    if (curr->name != "")
-      ret.push_back(curr->name);
-    curr = curr->parent_scope;
+  while (true) {
+    if (curr.name != "")
+      ret.push_back(curr.name);
+    if (curr.parent_scope == nullptr)
+      break;
+    curr = *curr.parent_scope;
   }
   return ret;
 }
 std::string Scope::get_prefix() {
-  auto path = full_path(this);
+  auto path = full_path(*this);
   std::stringstream ret;
   for (auto it = path.rbegin(); it != path.rend(); it++)
     ret << *it << "::";
@@ -31,7 +53,11 @@ std::string Scope::get_prefix() {
 
 Value *Scope::get_variable(std::string name) { _get(variables, variable); }
 FunctionAST *Scope::get_function(std::string name) {
-  _get(functions, function);
+  if (named_functions.count(name))
+    return named_functions[name];
+  if (parent_scope)
+    return parent_scope->get_function(name);
+  return nullptr;
 }
 Type *Scope::get_type(std::string name) { _get(types, type); }
 Scope *Scope::get_scope(std::string name) { _get(scopes, scope); }
@@ -79,8 +105,7 @@ Generic *get_generic(Identifier id, Scope *scope) {
   _resolve(generics, generic);
 }
 
-Scope global_scope(nullptr);
-Scope *curr_scope = &global_scope;
+Scope *curr_scope = new Scope(nullptr);
 Scope *push_scope() { return curr_scope = new Scope(curr_scope); }
 Scope *push_space(std::string name) {
   auto space = new Scope(curr_scope, name);
@@ -90,14 +115,13 @@ Scope *push_space(std::string name) {
 Scope *pop_scope() {
   for (auto &[name, value] : curr_scope->named_variables) {
     Type *type = value->get_type();
-    FunctionAST *destructor = type->get_destructor();
+    auto destructor = type->get_destructor();
     if (!destructor)
       continue;
     LLVMValueRef llvm_val = value->gen_val();
     if (!llvm_val) // type phase
       continue;
-    ConstValue val = ConstValue(type, llvm_val);
-    destructor->gen_call({&val});
+    destructor->gen_call({}, new ConstValue(type, llvm_val));
   }
   return curr_scope = curr_scope->parent_scope;
 }

@@ -1,4 +1,4 @@
-#include "../asts.h"
+#include "conditional.h"
 
 OrExprAST::OrExprAST(ExprAST *left, ExprAST *right)
     : left(left), right(right) {}
@@ -50,6 +50,7 @@ Value *AndExprAST::gen_value() {
   return gen_shortcircuit(get_type(), left, right, And);
 }
 
+#include "null.h"
 void IfExprAST::init() {
   Type *then_t = then->get_type();
   type = then_t;

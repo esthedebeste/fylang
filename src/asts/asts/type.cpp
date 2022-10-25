@@ -1,4 +1,5 @@
-#include "../asts.h"
+#include "type.h"
+#include "null.h"
 
 TypeAssertExprAST::TypeAssertExprAST(TypeAST *a, TypeAST *b) : a(a), b(b) {}
 Type *TypeAssertExprAST::get_type() {

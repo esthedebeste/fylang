@@ -1,4 +1,4 @@
-#include "../asts.h"
+#include "array.h"
 
 ArrayExprAST::ArrayExprAST(std::vector<ExprAST *> elements)
     : elements(elements) {}

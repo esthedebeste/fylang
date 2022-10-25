@@ -35,7 +35,8 @@ public:
   bool match(Type *type, uint *g);
   bool is_generic();
 };
-inline TypeAST *type_ast(Type *t) { return new AbsoluteTypeAST(t); }
+
+inline static auto type_ast(auto t) { return new AbsoluteTypeAST(t); }
 
 class UnaryTypeAST : public TypeAST {
 public:

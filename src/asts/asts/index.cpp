@@ -1,4 +1,4 @@
-#include "../asts.h"
+#include "index.h"
 
 IndexExprAST::IndexExprAST(ExprAST *value, ExprAST *index)
     : value(value), index(index) {}
@@ -47,10 +47,9 @@ NumAccessExprAST::NumAccessExprAST(unsigned int index, ExprAST *source)
 
 Type *NumAccessExprAST::get_type() {
   Type *st = source->get_type();
-  if (st->type_type() == TypeType::Pointer) {
+  is_ptr = st->type_type() == TypeType::Pointer;
+  if (is_ptr)
     st = dynamic_cast<PointerType *>(source->get_type())->get_points_to();
-    is_ptr = true;
-  }
   source_type = dynamic_cast<TupleType *>(st);
   return source_type->get_elem_type(index);
 }

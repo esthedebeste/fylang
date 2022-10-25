@@ -45,6 +45,16 @@ bool FuncFlags::set_by_string(std::string str, std::string value) {
   }
   return true;
 }
+bool FuncFlags::set_flag(std::string str) {
+  if (str == "vararg")
+    return is_vararg = true;
+  else if (str == "inline")
+    return is_inline = true;
+  // might rename to "export" or "extern"? not sure.
+  else if (str == "always_compile")
+    return always_compile = true;
+  return false;
+}
 bool FuncFlags::eq(FuncFlags other) {
   return is_vararg == other.is_vararg && is_inline == other.is_inline &&
          always_compile == other.always_compile && call_conv == other.call_conv;

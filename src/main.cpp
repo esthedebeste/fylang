@@ -1,3 +1,4 @@
+#include "asts/asts/utils.h"
 #include "parser.h"
 #include "ucr.h"
 #include "utils.h"
@@ -11,8 +12,7 @@ void handle_global_include() {
     file_name = file_name.replace(os_loc, 4, os_name);
     debug_log("Replaced {os} with '" << os_name << "'");
   }
-  CharReader *curr_file = queue.back();
-  add_file_to_queue(curr_file->file_path, file_name);
+  add_file_to_queue(file_name);
   eat(T_STRING);
 }
 
@@ -176,11 +176,11 @@ int main(int argc, char **argv, char **envp) {
     if (ext == "bc")
       LLVMWriteBitcodeToFile(curr_module, out.c_str());
     else if (ext == "asm")
-      LLVMTargetMachineEmitToFile(target_machine, curr_module,
-                                  strdup(out.c_str()), LLVMAssemblyFile, &err);
+      LLVMTargetMachineEmitToFile(target_machine, curr_module, out.data(),
+                                  LLVMAssemblyFile, &err);
     else if (ext == "o")
-      LLVMTargetMachineEmitToFile(target_machine, curr_module,
-                                  strdup(out.c_str()), LLVMObjectFile, &err);
+      LLVMTargetMachineEmitToFile(target_machine, curr_module, out.data(),
+                                  LLVMObjectFile, &err);
     else if (ext == "ll")
       LLVMPrintModuleToFile(curr_module, out.c_str(), &err);
     else
@@ -201,7 +201,7 @@ int main(int argc, char **argv, char **envp) {
     LLVMExecutionEngineRef engine;
     char *err;
     bool errored =
-        LLVMCreateJITCompilerForModule(&engine, curr_module, 0, &err);
+        LLVMCreateJITCompilerForModule(&engine, curr_module, 3, &err);
     if (errored)
       error(std::string("JIT Failed: ") + err);
     int nargc = argc - 2;

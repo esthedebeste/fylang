@@ -65,33 +65,35 @@ static FunctionType *get_func_type(FunctionAST *func) {
   return type;
 }
 FunctionType *FunctionAST::get_type() {
-  Scope *prev_scope = curr_scope;
+  auto prev_scope = curr_scope;
   curr_scope = new Scope(base_scope);
   auto type = get_func_type(this);
   curr_scope = prev_scope;
   return type;
 }
-FunctionType *FunctionAST::get_type(std::vector<ExprAST *> args) {
+FunctionType *FunctionAST::get_type(std::vector<Type *> args) {
   if (ft.flags.is_vararg ? args.size() < this->args.size()
                          : args.size() != this->args.size())
     error("wrong number of arguments to function "
           << name << " (expected " << this->args.size() << ", got "
           << args.size() << ")");
-  std::vector<Type *> arg_types;
-  for (auto arg : args)
-    arg_types.push_back(arg->get_type());
-  Scope *prev_scope = curr_scope;
+  auto prev_scope = curr_scope;
   curr_scope = new Scope(base_scope);
   for (size_t i = 0; i < args.size(); ++i) {
-    if (i < this->args.size() &&
-        !this->args[i].second->castable_from(arg_types[i]))
+    if (i < this->args.size() && !this->args[i].second->castable_from(args[i]))
       error("argument " + std::to_string(i) + " to function " + name +
-            " has wrong type, got: " + arg_types[i]->stringify() +
+            " has wrong type, got: " + args[i]->stringify() +
             ", expected: " + this->args[i].second->stringify());
   }
   auto type = get_func_type(this);
   curr_scope = prev_scope;
   return type;
+}
+FunctionType *FunctionAST::get_type(std::vector<ExprAST *> args) {
+  std::vector<Type *> arg_types;
+  for (auto &arg : args)
+    arg_types.push_back(arg->get_type());
+  return get_type(arg_types);
 }
 // Returns PHI of return value, moves to return block
 LLVMValueRef FunctionAST::gen_body(LLVMValueRef *args, FunctionType *type) {
@@ -130,7 +132,7 @@ ConstValue *FunctionAST::gen_call(std::vector<Value *> arg_vals) {
     error("wrong number of arguments to function "
           << name << " (expected " << this->args.size() << ", got "
           << arg_vals.size() << ")");
-  Scope *prev_scope = curr_scope;
+  auto prev_scope = curr_scope;
   curr_scope = new Scope(base_scope);
   for (size_t i = 0; i < arg_vals.size(); ++i) {
     Type *arg_type = arg_vals[i]->get_type();
@@ -189,7 +191,7 @@ ConstValue *FunctionAST::gen_call(std::vector<Value *> arg_vals) {
 }
 
 FuncValue *FunctionAST::gen_ptr() {
-  Scope *prev_scope = curr_scope;
+  auto prev_scope = curr_scope;
   curr_scope = new Scope(base_scope);
   for (auto &[name, type] : this->args)
     curr_scope->declare_variable(name, type->type());
@@ -251,11 +253,18 @@ FunctionType *MethodAST::get_type(std::vector<ExprAST *> args,
   args.insert(args.begin(), this_arg);
   return FunctionAST::get_type(args);
 }
+FunctionType *MethodAST::get_type(std::vector<Type *> args, Type *this_arg) {
+  args.insert(args.begin(), this_arg);
+  return FunctionAST::get_type(args);
+}
 Value *MethodAST::gen_call(std::vector<ExprAST *> args, ExprAST *this_arg) {
   args.insert(args.begin(), this_arg);
   return FunctionAST::gen_call(args);
 }
-
+Value *MethodAST::gen_call(std::vector<Value *> args, Value *this_arg) {
+  args.insert(args.begin(), this_arg);
+  return FunctionAST::gen_call(args);
+}
 void MethodAST::add() { curr_extension_methods[name].push_back(this); }
 
 #include "limits.h"
@@ -264,14 +273,15 @@ MethodAST *get_method(Type *this_type, std::string name) {
     return nullptr;
   uint min_generic = UINT_MAX;
   MethodAST *best_match = nullptr;
-  for (auto &method : curr_extension_methods[name]) {
+  for (auto method : curr_extension_methods[name]) {
     uint generic_count = 0;
     if (method->this_type->match(this_type, &generic_count) &&
         generic_count < min_generic) {
-      min_generic = generic_count, best_match = method;
+      min_generic = generic_count;
+      best_match = method;
     }
   }
   return best_match;
 }
 
-FunctionAST *Type::get_destructor() { return get_method(this, "__free__"); }
+MethodAST *Type::get_destructor() { return get_method(this, "__free__"); }

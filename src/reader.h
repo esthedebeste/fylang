@@ -1,27 +1,11 @@
 #pragma once
 #include "consts.h"
-#include <fstream>
-#include <string>
-#include <vector>
+#include <filesystem>
 
-class CharReader {
-  char buf[4096];
-  char *p = buf;
-  size_t n = 0;
-  bool ended = false;
-
-public:
-  std::string file_path;
-  std::ifstream file;
-  CharReader(std::string file_path);
-  ~CharReader();
-  char next_char();
-};
-
-extern std::vector<std::string> visited_paths;
-extern std::vector<CharReader *> queue;
 int next_char();
-
-CharReader *get_file(std::string base_path, std::string relative_path);
-
-void add_file_to_queue(std::string base_path, std::string relative_path);
+std::filesystem::path get_fy_file(std::filesystem::path base_path,
+                                  std::string relative_path);
+void add_file_to_queue(std::filesystem::path relative_path);
+void add_file_to_queue(std::filesystem::path base_path,
+                       std::string relative_path);
+void add_file_to_queue(std::string relative_path);

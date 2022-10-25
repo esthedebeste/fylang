@@ -1,4 +1,4 @@
-#include "../asts.h"
+#include "number.h"
 
 std::unordered_map<char, NumType> num_type_chars = {
     {'b', NumType(8, false, false)}, {'d', NumType(64, true, true)},

@@ -1,4 +1,4 @@
-#include "../asts.h"
+#include "call.h"
 
 FunctionType *ValueCallExprAST::get_func_type() {
   FunctionType *func_t = dynamic_cast<FunctionType *>(called->get_type());
@@ -44,19 +44,26 @@ Value *ValueCallExprAST::gen_value() {
   return new ConstValue(func_t->return_type, call);
 }
 
+#include "variable.h"
 NameCallExprAST::NameCallExprAST(Identifier name, std::vector<ExprAST *> args)
     : name(name), args(args) {}
 Type *NameCallExprAST::get_type() {
   if (auto function = get_function(name))
     return function->get_type(args)->return_type;
-  else
-    return ValueCallExprAST(new VariableExprAST(name), args).get_type();
+  else {
+    VariableExprAST var(name);
+    ValueCallExprAST value_call(&var, args);
+    return value_call.get_type();
+  }
 }
 Value *NameCallExprAST::gen_value() {
   if (auto function = get_function(name))
     return function->gen_call(args);
-  else
-    return ValueCallExprAST(new VariableExprAST(name), args).gen_value();
+  else {
+    VariableExprAST var(name);
+    ValueCallExprAST value_call(&var, args);
+    return value_call.gen_value();
+  }
 }
 
 ExtAndPtr MethodCallExprAST::get_extension() {
@@ -72,22 +79,31 @@ MethodCallExprAST::MethodCallExprAST(std::string name, ExprAST *source,
                                      std::vector<ExprAST *> args)
     : name(name), source(source), args(args) {}
 
+#include "index.h"
+#include "unary.h"
 Type *MethodCallExprAST::get_type() {
   auto ext = get_extension();
-  if (ext.extension != nullptr)
-    return ext.extension
-        ->get_type(args, ext.is_ptr ? new UnaryExprAST('&', source) : source)
-        ->return_type;
-  else
-    return ValueCallExprAST(new PropAccessExprAST(name, source), args)
-        .get_type();
+  if (ext.extension != nullptr) {
+    if (ext.is_ptr) {
+      UnaryExprAST ptr('&', source);
+      return ext.extension->get_type(args, &ptr)->return_type;
+    } else
+      return ext.extension->get_type(args, source)->return_type;
+  } else {
+    PropAccessExprAST prop(name, source);
+    return ValueCallExprAST(&prop, args).get_type();
+  }
 }
 Value *MethodCallExprAST::gen_value() {
   auto ext = get_extension();
-  if (ext.extension != nullptr)
-    return ext.extension->gen_call(
-        args, ext.is_ptr ? new UnaryExprAST('&', source) : source);
-  else
-    return ValueCallExprAST(new PropAccessExprAST(name, source), args)
-        .gen_value();
+  if (ext.extension == nullptr) {
+    PropAccessExprAST prop(name, source);
+    return ValueCallExprAST(&prop, args).gen_value();
+  }
+
+  if (ext.is_ptr) {
+    UnaryExprAST ptr('&', source);
+    return ext.extension->gen_call(args, &ptr);
+  } else
+    return ext.extension->gen_call(args, source);
 }

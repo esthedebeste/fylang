@@ -1,4 +1,5 @@
-#include "../asts.h"
+#include "binop.h"
+#include "bool.h"
 
 LLVMValueRef gen_num_num_binop(int op, LLVMValueRef L, LLVMValueRef R,
                                NumType *lhs_nt, NumType *rhs_nt) {
@@ -103,10 +104,10 @@ LLVMValueRef gen_ptr_num_binop(int op, LLVMValueRef ptr, LLVMValueRef num,
 }
 LLVMValueRef gen_ptr_ptr_binop(int op, LLVMValueRef L, LLVMValueRef R,
                                PointerType *lhs_ptr, PointerType *rhs_pt) {
-  NumType uint_ptrsize(false);
-  auto il = LLVMBuildPtrToInt(curr_builder, L, uint_ptrsize.llvm_type(), UN);
-  auto ir = LLVMBuildPtrToInt(curr_builder, R, uint_ptrsize.llvm_type(), UN);
-  auto result = gen_num_num_binop(op, il, ir, &uint_ptrsize, &uint_ptrsize);
+  NumType *uint_ptrsize = new NumType(false);
+  auto il = LLVMBuildPtrToInt(curr_builder, L, uint_ptrsize->llvm_type(), UN);
+  auto ir = LLVMBuildPtrToInt(curr_builder, R, uint_ptrsize->llvm_type(), UN);
+  auto result = gen_num_num_binop(op, il, ir, uint_ptrsize, uint_ptrsize);
   if (binop_precedence[op] == comparison_prec)
     return result;
   else
@@ -116,11 +117,11 @@ LLVMValueRef gen_ptr_ptr_binop(int op, LLVMValueRef L, LLVMValueRef R,
 LLVMValueRef gen_arr_arr_binop(int op, LLVMValueRef L, LLVMValueRef R,
                                ArrayType *lhs_at, ArrayType *rhs_at) {
   if (lhs_at->neq(rhs_at))
-    error("Array-array comparison with different types: " +
-          lhs_at->stringify() + " doesn't match " + rhs_at->stringify());
+    error("Array-array binop with different types: " + lhs_at->stringify() +
+          " doesn't match " + rhs_at->stringify());
   auto arr_size = lhs_at->count;
   if (arr_size == 0)
-    error("Array-array comparison with empty arrays");
+    error("Array-array binop with empty arrays");
   auto arr_type = lhs_at->llvm_type();
   auto res_type = get_binop_type(op, lhs_at->elem, rhs_at->elem);
   LLVMValueRef res = nullptr;
@@ -130,18 +131,45 @@ LLVMValueRef gen_arr_arr_binop(int op, LLVMValueRef L, LLVMValueRef R,
     auto elem_res =
         gen_binop(op, lhs_elem, rhs_elem, lhs_at->elem, rhs_at->elem);
     auto elem_val = elem_res->gen_val();
-    if (op == T_EQEQ) {
+    if (op == T_EQEQ || op == T_NEQ) {
       // a[0] == b[0] && a[1] == b[1] && ...
       if (!res)
         res = elem_val;
       else
         res = LLVMBuildAnd(curr_builder, res, elem_val, UN);
+      if (op == T_NEQ)
+        res = LLVMBuildNot(curr_builder, res, UN); // !(a[0] == b[0] && ...)
     } else {
       // ( a[0] + b[0], a[1] + b[1], ... )
       if (!res)
         res = LLVMGetUndef(arr_type);
       res = LLVMBuildInsertValue(curr_builder, res, elem_val, i, UN);
     }
+  }
+  return res;
+}
+
+LLVMValueRef gen_arr_x_binop(int op, LLVMValueRef L, LLVMValueRef R,
+                             ArrayType *lhs_at, Type *rhs_t) {
+  if (lhs_at->elem->neq(rhs_t))
+    error("Array-item binop with different types: " +
+          lhs_at->elem->stringify() + " doesn't match " + rhs_t->stringify());
+  auto arr_size = lhs_at->count;
+  if (arr_size == 0)
+    error("Array-array binop with empty arrays");
+  if (binop_precedence[op] == comparison_prec)
+    error("Can't do array-item comparison ([1,2,3] == 1 doesn't work)");
+  auto arr_type = lhs_at->llvm_type();
+  auto res_type = get_binop_type(op, lhs_at->elem, rhs_t);
+  LLVMValueRef res = nullptr;
+  for (size_t i = 0; i < arr_size; i++) {
+    auto lhs_elem = LLVMBuildExtractValue(curr_builder, L, i, UN);
+    auto elem_res = gen_binop(op, lhs_elem, R, lhs_at->elem, rhs_t);
+    auto elem_val = elem_res->gen_val();
+    // ( a[0] + b[0], a[1] + b[1], ... )
+    if (!res)
+      res = LLVMGetUndef(arr_type);
+    res = LLVMBuildInsertValue(curr_builder, res, elem_val, i, UN);
   }
   return res;
 }
@@ -162,6 +190,8 @@ Type *get_binop_type(int op, Type *lhs_t, Type *rhs_t) {
     return /* ptr */ rhs_t;
   else if (lhs_tt == Array && rhs_tt == Array)
     return lhs_t; // array + array returns array
+  else if (lhs_tt == Array)
+    return lhs_t; // array + item returns array
   else if (lhs_tt == Pointer && rhs_tt == Pointer)
     return lhs_t; // ptr + ptr returns ptr
   error("Unknown op " + token_to_str(op) + " for types " + lhs_t->stringify() +
@@ -187,6 +217,8 @@ Value *gen_binop(int op, LLVMValueRef L, LLVMValueRef R, Type *lhs_t,
     return new ConstValue(type, gen_ptr_ptr_binop(op, L, R, lhs_pt, rhs_pt));
   else if (lhs_at && rhs_at)
     return new ConstValue(type, gen_arr_arr_binop(op, L, R, lhs_at, rhs_at));
+  else if (lhs_at)
+    return new ConstValue(type, gen_arr_x_binop(op, L, R, lhs_at, rhs_t));
   error("Unknown op " + token_to_str(op) + " for types " + lhs_t->stringify() +
         " and " + rhs_t->stringify());
 }

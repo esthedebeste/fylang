@@ -8,10 +8,7 @@ fun double(x: int, i: uint_ptrsize): int
 	x * 2
 
 fun main() {
-	let arr: Array<int>
-	arr.init()
-	arr.push(2)
-	arr.push(3)
+	let arr = Array([2, 3])
 	arr.push(1)
 	print("arr: ")
 	print("\n - length: ") print(arr.length)

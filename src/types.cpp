@@ -73,7 +73,7 @@ LLVMTypeRef PointerType::llvm_type() {
 TypeType PointerType::type_type() { return TypeType::Pointer; }
 bool PointerType::eq(Type *other) {
   if (other->type_type() == TypeType::Function)
-    return other->eq(this);
+    return this->points_to->eq(other);
   if (PointerType *other_n = dynamic_cast<PointerType *>(other))
     return other_n->points_to->eq(this->points_to);
   return false;
@@ -215,12 +215,24 @@ std::string StructType::stringify() {
   return res.str();
 }
 
+std::unordered_map<std::string, LLVMTypeRef> llvm_named_types;
+LLVMTypeRef get_or_create_struct(std::string name) {
+  if (llvm_named_types.count(name))
+    return llvm_named_types[name];
+  auto type = LLVMStructCreateNamed(curr_ctx, name.c_str());
+  llvm_named_types[name] = type;
+  return type;
+}
+NamedOpaqueType::NamedOpaqueType(std::string name)
+    : NamedStructType(name, {}) {}
+LLVMTypeRef NamedOpaqueType::llvm_type() { return get_or_create_struct(name); }
+
 NamedStructType::NamedStructType(
     std::string name, std::vector<std::pair<std::string, Type *>> fields)
     : name(name), StructType(fields) {}
 LLVMTypeRef NamedStructType::llvm_type() {
   if (!gave_name) {
-    llvm_struct_type = LLVMStructCreateNamed(curr_ctx, name.c_str());
+    llvm_struct_type = get_or_create_struct(name);
     LLVMTypeRef *llvm_types = new LLVMTypeRef[fields.size()];
     for (size_t i = 0; i < fields.size(); i++)
       llvm_types[i] = fields[i].second->llvm_type();

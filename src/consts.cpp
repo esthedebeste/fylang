@@ -1,6 +1,6 @@
 #include "consts.h"
 bool DEBUG = false;
-std::string std_dir;
+std::filesystem::path std_dir;
 std::string os_name;
 LLVMContextRef curr_ctx;
 LLVMBuilderRef curr_builder;

@@ -11,7 +11,7 @@ enum TypeType : int {
   Tuple,
 };
 class PointerType;
-class FunctionAST;
+class MethodAST;
 /// Base type class.
 class Type {
 public:
@@ -22,7 +22,7 @@ public:
   virtual bool neq(Type *other);
   virtual bool castable_to(Type *other);
   virtual std::string stringify();
-  virtual FunctionAST *get_destructor(); // defined in asts/functions.cpp
+  virtual MethodAST *get_destructor(); // defined in asts/functions.cpp
   bool operator==(Type *other);
   bool operator!=(Type *other);
   PointerType *ptr();
@@ -128,6 +128,11 @@ public:
   LLVMTypeRef llvm_type();
   bool eq(Type *other);
   std::string stringify();
+};
+class NamedOpaqueType : public NamedStructType {
+public:
+  NamedOpaqueType(std::string name);
+  LLVMTypeRef llvm_type();
 };
 class FunctionType : public Type {
 public:

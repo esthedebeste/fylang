@@ -1,11 +1,20 @@
 include "types.fy"
 include "consts.fy"
 include "c/stdlib"
+include "c/string"
 
 struct Array<T> {
 	ptr: *T,
 	length: uint_ptrsize,
 	allocated: uint_ptrsize
+}
+
+fun Array(elems: generic T[generic Len]): Array<T> {
+	const sz: uint_ptrsize = sizeof(T) * Len
+	const ptr = malloc(sz) as *typeof(elems)
+	ptr[0] = elems
+	const arr = create Array<T> { ptr = ptr, length = Len, allocated = Len }
+	arr
 }
 
 fun create_array(first_elem: generic T): *Array<T> {
@@ -20,9 +29,8 @@ fun(*Array<generic T>) init() {
 	this.allocated = 1
 }
 
-inline fun(Array<generic T>) __free__()
+fun(Array<generic T>) free()
 	free(this.ptr)
-
 // returns the array's new length
 fun(*Array<generic T>) push(added: T): uint_ptrsize {
 	if(this.length >= this.allocated) {

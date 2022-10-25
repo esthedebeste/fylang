@@ -15,7 +15,6 @@ extern std::string string_value; // "[^"]*" - Filled in if T_STRING
 enum StringType { C_STRING, CHAR_ARRAY, PTR_CHAR_ARRAY };
 extern StringType string_type; // Type of string
 
-std::string token_to_str(const int token);
 extern char last_char;
 std::string read_str(bool (*predicate)(char));
 bool is_numish(char c);

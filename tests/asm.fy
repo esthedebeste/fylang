@@ -2,7 +2,6 @@ include "c/stdio"
 
 declare fun four cc(C)(): int
 __asm__(".globl four
-		.type four, @function
 		four:
 		.cfi_startproc
 		movl $4, %eax

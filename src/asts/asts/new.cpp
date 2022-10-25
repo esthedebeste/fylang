@@ -1,4 +1,5 @@
-#include "../asts.h"
+#include "new.h"
+#include "utils.h"
 
 NewExprAST::NewExprAST(TypeAST *s_type,
                        std::vector<std::pair<std::string, ExprAST *>> fields,

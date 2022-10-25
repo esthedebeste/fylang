@@ -1,4 +1,4 @@
-#include "../asts.h"
+#include "asm.h"
 
 ASMExprAST::ASMExprAST(TypeAST *type_ast, std::string asm_str,
                        std::string out_reg,

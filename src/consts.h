@@ -1,15 +1,17 @@
 #pragma once
+#include <filesystem>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 extern "C" {
-#include "llvm-c-14/llvm-c/BitWriter.h"
-#include "llvm-c-14/llvm-c/Core.h"
-#include "llvm-c-14/llvm-c/ExecutionEngine.h"
-#include "llvm-c-14/llvm-c/TargetMachine.h"
+#include "llvm-c/BitWriter.h"
+#include "llvm-c/Core.h"
+#include "llvm-c/ExecutionEngine.h"
+#include "llvm-c/TargetMachine.h"
 }
 extern bool DEBUG;
-extern std::string std_dir;
+extern std::filesystem::path std_dir;
 extern std::string os_name;
 using uint = unsigned int;
 enum Token : const int {

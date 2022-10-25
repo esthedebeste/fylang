@@ -1,4 +1,5 @@
-#include "../asts.h"
+#include "loop.h"
+#include "null.h"
 
 std::vector<LoopState> loop_stack;
 
@@ -14,7 +15,7 @@ Value *ContinueExprAST::gen_value() {
       curr_builder,
       LLVMAppendBasicBlock(
           LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder)), UN));
-  return new ConstValue(&null_type, LLVMConstNull(null_type.llvm_type()));
+  return null_value();
 }
 
 BreakExprAST::BreakExprAST() {}
@@ -29,7 +30,7 @@ Value *BreakExprAST::gen_value() {
       curr_builder,
       LLVMAppendBasicBlock(
           LLVMGetBasicBlockParent(LLVMGetInsertBlock(curr_builder)), UN));
-  return new ConstValue(&null_type, LLVMConstNull(null_type.llvm_type()));
+  return null_value();
 }
 
 WhileExprAST::WhileExprAST(ExprAST *cond, ExprAST *body, ExprAST *elze)

@@ -46,7 +46,6 @@ struct Scope {
   void set_generic(std::string name, Generic *value);
   std::string get_prefix();
 };
-extern Scope global_scope;
 extern Scope *curr_scope;
 
 Value *get_variable(Identifier id, Scope *base = curr_scope);

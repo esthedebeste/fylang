@@ -13,6 +13,7 @@ std::vector<B> seconds(const std::vector<std::pair<A, B>> &array) {
   return res;
 }
 
+std::string token_to_str(const int token);
 extern size_t unnamed_acc;
 const char *next_unnamed();
 // Unnamed symbol
@@ -41,6 +42,7 @@ struct FuncFlags {
                               // isn't referenced
   LLVMCallConv call_conv = LLVMCCallConv; // calling convention
   bool set_by_string(std::string str, std::string value);
+  bool set_flag(std::string str);
   bool eq(FuncFlags other);
   bool neq(FuncFlags other);
 };

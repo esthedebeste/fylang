@@ -1,4 +1,4 @@
-#include "../asts.h"
+#include "sizeof.h"
 
 NumType sizeof_type;
 bool sizeof_type_init = false;

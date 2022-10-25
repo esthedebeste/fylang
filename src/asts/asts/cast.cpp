@@ -1,4 +1,4 @@
-#include "../asts.h"
+#include "cast.h"
 
 CastExprAST::CastExprAST(ExprAST *value, TypeAST *to) : value(value), to(to) {}
 Type *CastExprAST::get_type() { return to->type(); }

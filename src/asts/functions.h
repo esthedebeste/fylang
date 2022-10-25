@@ -37,6 +37,7 @@ public:
   virtual std::string get_name(FunctionType *type);
   FuncValue *declare(FunctionType *type);
   FunctionType *get_type();
+  FunctionType *get_type(std::vector<Type *> args);
   FunctionType *get_type(std::vector<ExprAST *> args);
   // Returns PHI of return value, moves to return block
   LLVMValueRef gen_body(LLVMValueRef *args, FunctionType *type);
@@ -54,8 +55,10 @@ public:
             FuncFlags flags = {}, TypeAST *return_type = nullptr,
             ExprAST *body = nullptr);
   std::string get_name(FunctionType *type) override;
+  FunctionType *get_type(std::vector<Type *> args, Type *this_arg);
   FunctionType *get_type(std::vector<ExprAST *> args, ExprAST *this_arg);
   Value *gen_call(std::vector<ExprAST *> args, ExprAST *this_arg);
+  Value *gen_call(std::vector<Value *> args, Value *this_arg);
   void add() override;
 };
 

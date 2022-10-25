@@ -36,7 +36,6 @@ do
   export QUIET=1
   args="run tests/$file.fy 2>&1"
   try
-  # out=$(QUIET=1 $dir/build/fy run "tests/$file" 2>&1)
   if [ -f "tests/$file.txt" ]; then
     expected=$(<"tests/$file.txt")
     if [ "$out" != "$expected" ]; then

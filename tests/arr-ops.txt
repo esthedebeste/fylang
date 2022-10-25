@@ -1,2 +1,3 @@
 Array comparison works
 Array adding works
+Array-item adding works

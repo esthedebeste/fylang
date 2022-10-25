@@ -1,4 +1,6 @@
-#include "../asts.h"
+#include "let.h"
+#include "cast.h"
+#include "utils.h"
 
 LetExprAST::LetExprAST(std::string id, TypeAST *type, ExprAST *value,
                        bool constant)
